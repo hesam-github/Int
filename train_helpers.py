@@ -37,7 +37,8 @@ from focal_loss import binary_focal_loss, weighted_binary_crossentropy, composit
 from log_mode import set_log_mode, phase
 
 from augmentation import AUGMENTATION_CFG, _describe_aug_cfg
-
+from focal_loss import (binary_focal_loss, weighted_binary_crossentropy,
+                        composite_intent_loss, bce_plus_focal_loss)
 
 def find_kfold_run_dirs(experiments_root, framework, architecture):
     """
@@ -626,16 +627,7 @@ def interactive_pick_data_split():
     return 'kfold', split_opts, True
 
 
-def build_split_sequences(imdb, data_opts):
-    """
-    Wraps imdb.generate_data_trajectory_sequence() for all three splits,
-    including the kfold case where PIE itself cannot produce a 'val' split
-    (see interactive_pick_data_split() docstring). data_opts must already
-    contain 'data_split_type' and whatever split_opts interactive_pick_
-    data_split() returned merged in.
-
-    :return: beh_seq_train, beh_seq_val, beh_seq_test
-    """
+def build_split_sequences(imdb, data_opts, carve_seed=42):
     split_type = data_opts['data_split_type']
 
     if split_type != 'kfold':
@@ -646,7 +638,6 @@ def build_split_sequences(imdb, data_opts):
         beh_seq_test  = imdb.generate_data_trajectory_sequence('test',  **data_opts)
         return beh_seq_train, beh_seq_val, beh_seq_test
 
-    # kfold: PIE only supports 'train' and 'test' for this split type.
     val_fraction = data_opts.pop('_manual_val_fraction', 0.15)
     print("Building train sequence (kfold)...")
     beh_seq_train_full = imdb.generate_data_trajectory_sequence('train', **data_opts)
@@ -654,10 +645,68 @@ def build_split_sequences(imdb, data_opts):
     beh_seq_test        = imdb.generate_data_trajectory_sequence('test',  **data_opts)
 
     beh_seq_train, beh_seq_val = _carve_validation_split(
-        beh_seq_train_full, val_fraction=val_fraction, seed=42)
+        beh_seq_train_full, val_fraction=val_fraction, seed=carve_seed)
     return beh_seq_train, beh_seq_val, beh_seq_test
 
+def _ask_seed(label, default):
+    while True:
+        raw = input(f"[seed] {label} (non-negative int) [default: {default}]: ").strip()
+        if raw == "":
+            return int(default)
+        if raw.isdigit():
+            return int(raw)
+        print("  ! enter a non-negative integer.")
 
+
+def interactive_pick_seeds(split_type, balance_mode, train_default,
+                           data_default=42, split_default=42):
+    print("\n[seed] independent seeds:", flush=True)
+    print("  train  : weight init, dropout masks", flush=True)
+    print("  shuffle: epoch order of training windows (Enter = same as train seed)", flush=True)
+    print("  data   : undersampling / augmentation draws", flush=True)
+    if balance_mode == 'none':
+        print("           balance_mode=none has no random draw: data seed has no effect", flush=True)
+    train_seed = _ask_seed("train seed", train_default)
+    shuffle_seed = _ask_seed("shuffle seed", train_seed)
+    data_seed = _ask_seed("data seed", data_default)
+    split_seed = split_default
+    if split_type in ('random', 'kfold'):
+        print("  split  : random/kfold split file, kfold val carve", flush=True)
+        split_seed = _ask_seed("split seed", split_default)
+    else:
+        print("  split  : not used (default split is fixed by video sets)", flush=True)
+    return train_seed, shuffle_seed, data_seed, split_seed
+
+
+def ensure_split_seed(imdb, split_type, data_opts, split_seed):
+    """random/kfold split files are cached without a seed in their name.
+    If the cached file was made with another split seed it is deleted AND rebuilt
+    immediately, so the sequence cache (keyed by the file hash) can never see a
+    missing file. A file without a tag is assumed to be seed 42."""
+    imdb._RANDOM_SEED = split_seed
+    if split_type == 'random':
+        split_file = os.path.join(imdb.cache_path, 'random_samples.pkl')
+    elif split_type == 'kfold':
+        n = data_opts['kfold_params']['num_folds']
+        split_file = os.path.join(imdb.cache_path, f'{n}_fold_samples.pkl')
+    else:
+        return
+    tag_file = split_file + '.seed.json'
+    stored = 42
+    if os.path.isfile(tag_file):
+        with open(tag_file, encoding='utf-8') as fid:
+            stored = json.load(fid)['split_seed']
+    if os.path.isfile(split_file) and stored != split_seed:
+        print(f"[split] cached {split_type} split has split_seed={stored}; "
+              f"rebuilding with split_seed={split_seed}")
+        os.remove(split_file)
+    if not os.path.isfile(split_file):
+        if split_type == 'random':
+            imdb._get_random_pedestrian_ids('train', **data_opts['random_params'])
+        else:
+            imdb._get_kfold_pedestrian_ids('train', **data_opts['kfold_params'])
+    with open(tag_file, 'w', encoding='utf-8') as fid:
+        json.dump({'split_seed': split_seed}, fid)
 
 def _carve_validation_split(beh_seq, val_fraction=0.15, seed=42):
     """
@@ -1059,6 +1108,8 @@ def interactive_pick_loss_choice(balance_mode=None):
           "augmentation is applied)", flush=True)
     print("  [3] composite            (CE + optional focal / smoothing / confidence / ranking)", flush=True)
 
+    print("  [4] bce_plus_focal       (BCE + weight * focal, summed)", flush=True)
+
     while True:
         raw = input("[loss_function] enter a number from the list above [default: 0]: ").strip()
 
@@ -1077,7 +1128,14 @@ def interactive_pick_loss_choice(balance_mode=None):
             return "weighted_bce", None  # resolved later, once train data is final
         if raw == "3":
             return interactive_pick_composite_loss(balance_mode=balance_mode)
-
+       
+        if raw == "4":
+            g_raw = input("  [bce_plus_focal] gamma [default: 2.0]: ").strip()
+            w_raw = input("  [bce_plus_focal] focal_weight [default: 1.0]: ").strip()
+            gamma = float(g_raw) if g_raw else 2.0
+            weight = float(w_raw) if w_raw else 1.0
+            fn = bce_plus_focal_loss(gamma=gamma, focal_weight=weight)
+            return fn.__name__, fn
         print("  ! please enter 0, 1, or 2 or 3.", flush=True)
 
 
@@ -1350,20 +1408,16 @@ def _print_class_counts(beh_seq, split_name, balance_mode_tag):
 
 
 def apply_balancing_strategy(imdb, beh_seq_train, beh_seq_val, balance_mode,
-                              augment_fn, val_augment_mode='undersample_val'):
-    """
-    Applies one of the three balancing strategies to train/val, exactly
-    matching the previous inline logic in train_pie_intent_tensorflow_gpu.py.
-
-    :param augment_fn: augment_pie_tracks from augmentation.py, passed in
-        rather than imported here to avoid a circular/heavy import at
-        module load time.
-    :return: (beh_seq_train, beh_seq_val) -- possibly rebuilt in place
-    """
+                             augment_fn, val_augment_mode='undersample_val',
+                             data_seed=42):
+    """data_seed drives every random draw here. Val augmentation uses data_seed + 1
+    (with data_seed=42 this reproduces the old 42/43 pair)."""
     if balance_mode == "undersample_base_article":
-        print("Balancing train/val via UNDERSAMPLING (base-article method)...")
-        beh_seq_train = imdb.balance_samples_count(beh_seq_train, label_type='intention_binary')
-        beh_seq_val   = imdb.balance_samples_count(beh_seq_val,   label_type='intention_binary')
+        print(f"Balancing train/val via UNDERSAMPLING (data_seed={data_seed})...")
+        beh_seq_train = imdb.balance_samples_count(
+            beh_seq_train, label_type='intention_binary', random_seed=data_seed)
+        beh_seq_val = imdb.balance_samples_count(
+            beh_seq_val, label_type='intention_binary', random_seed=data_seed)
 
     elif balance_mode == "none":
         print("Skipping balancing entirely -- train/val kept at raw, "
@@ -1372,19 +1426,18 @@ def apply_balancing_strategy(imdb, beh_seq_train, beh_seq_val, balance_mode,
         _print_class_counts(beh_seq_val,   'val',   'balance_mode=none')
 
     else:  # augmentation
-        print("Balancing train/val via AUGMENTATION (custom method)...")
+        print(f"Balancing train/val via AUGMENTATION (data_seed={data_seed})...")
         pos, neg = _print_class_counts(beh_seq_train, 'train', 'balance_mode=augmentation')
         minority_label = 0 if neg < pos else 1
         num_augments = max(1, -(-(max(pos, neg) - min(pos, neg)) // max(min(pos, neg), 1)))
         print(f"[augmentation] train: minority_label={minority_label} "
               f"(pos={pos} neg={neg}) num_augments={num_augments} -- "
-              f"{_describe_aug_cfg(AUGMENTATION_CFG)} seed=42")
-        
+              f"{_describe_aug_cfg(AUGMENTATION_CFG)} seed={data_seed}")
         beh_seq_train = augment_fn(beh_seq_train, num_augments=num_augments,
-                                    augment_only_label=minority_label, seed=42,
-                                    **AUGMENTATION_CFG)
-        
-        beh_seq_train = imdb.balance_samples_count(beh_seq_train, label_type='intention_binary')
+                                   augment_only_label=minority_label, seed=data_seed,
+                                   **AUGMENTATION_CFG)
+        beh_seq_train = imdb.balance_samples_count(
+            beh_seq_train, label_type='intention_binary', random_seed=data_seed)
 
         if val_augment_mode == 'augment_val':
             val_pos, val_neg = _print_class_counts(beh_seq_val, 'val', 'balance_mode=augmentation')
@@ -1392,24 +1445,24 @@ def apply_balancing_strategy(imdb, beh_seq_train, beh_seq_val, balance_mode,
             val_num_augments = max(1, -(-(max(val_pos, val_neg) - min(val_pos, val_neg)) // max(min(val_pos, val_neg), 1)))
             print(f"[augmentation] val: minority_label={val_minority_label} "
                   f"(pos={val_pos} neg={val_neg}) num_augments={val_num_augments} -- "
-                  f"{_describe_aug_cfg(AUGMENTATION_CFG)} seed=43")
+                  f"{_describe_aug_cfg(AUGMENTATION_CFG)} seed={data_seed + 1}")
             beh_seq_val = augment_fn(beh_seq_val, num_augments=val_num_augments,
-                                      augment_only_label=val_minority_label, seed=43,
-                                      **AUGMENTATION_CFG)
-            beh_seq_val = imdb.balance_samples_count(beh_seq_val, label_type='intention_binary')
+                                     augment_only_label=val_minority_label,
+                                     seed=data_seed + 1, **AUGMENTATION_CFG)
+            beh_seq_val = imdb.balance_samples_count(
+                beh_seq_val, label_type='intention_binary', random_seed=data_seed)
 
         elif val_augment_mode == 'natural_val':
             _print_class_counts(beh_seq_val, 'val',
                 'balance_mode=augmentation (val left natural/raw -- matches test distribution)')
-            # beh_seq_val unchanged
 
         else:  # 'undersample_val'
             print("[augmentation] val: balancing via UNDERSAMPLING (real samples only "
                   "-- matches reference paper's train_test.py)")
-            beh_seq_val = imdb.balance_samples_count(beh_seq_val, label_type='intention_binary')
+            beh_seq_val = imdb.balance_samples_count(
+                beh_seq_val, label_type='intention_binary', random_seed=data_seed)
 
     return beh_seq_train, beh_seq_val
-
 
 # ------------------------------------------------------------------
 # Run hyperparameter tag
@@ -2489,3 +2542,17 @@ def interactive_pick_zero_decoder_bbox(use_visual=True):
         if raw == '1':
             return True
         print("  ! enter 0 or 1.", flush=True)
+
+def interactive_pick_visual_norm():
+    """Asks whether the cached VGG16 conv5 maps are standardized per channel
+    (train statistics) before they enter the ConvLSTM. Default: no."""
+    print("\n[visual_norm] standardize VGG16 conv5 maps per channel before the ConvLSTM?", flush=True)
+    print("  [n] no  -- raw VGG16 activations, as cached  <-- default", flush=True)
+    print("  [y] yes -- (x - mean_train) / std_train per channel; statistics from TRAIN only", flush=True)
+    while True:
+        raw = input("[visual_norm] y/n [default: n]: ").strip().lower()
+        if raw in ('', 'n', 'no'):
+            return False
+        if raw in ('y', 'yes'):
+            return True
+        print("  ! enter y or n.", flush=True)

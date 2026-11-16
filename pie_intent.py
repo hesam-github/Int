@@ -66,13 +66,14 @@ from pie_data_Hesam import get_tracks
 PREP_TAG = "prep1"   # bump when crop/resize/preprocess logic changes
 FEATURE_CACHE_NAME = f"vgg16_none_{PREP_TAG}"
 
-def decoder_only_dataset(decoder_input, output, batch_size, shuffle, repeat):
+def decoder_only_dataset(decoder_input, output, batch_size, shuffle, repeat, shuffle_seed=None):
     dec = np.asarray(decoder_input, dtype=np.float32)
     out = np.asarray(output, dtype=np.float32)
     n = len(dec)
+    rng = np.random.RandomState(shuffle_seed) if shuffle_seed is not None else np.random
 
     def gen():
-        order = np.random.permutation(n) if shuffle else np.arange(n)
+        order = rng.permutation(n) if shuffle else np.arange(n)
         for start in range(0, n, batch_size):
             index = order[start:start + batch_size]
             yield dec[index], out[index]
@@ -615,15 +616,16 @@ class PIEIntent(object):
         return np.memmap(final_path, dtype=np.float32, mode="r", shape=shape)
 
 
-    def _dataset_from_memmap(self, feature_mmap, decoder, output, batch_size, shuffle, repeat):
-        """((encoder, decoder), y). repeat=True only for fit(); predict() must
-        stay finite or it never reaches the end of the dataset."""
+    def _dataset_from_memmap(self, feature_mmap, decoder, output, batch_size, shuffle, repeat,
+                             shuffle_seed=None):
         decoder = np.asarray(decoder, dtype=np.float32)
         output = np.asarray(output, dtype=np.float32)
         n = int(feature_mmap.shape[0])
+        # One RandomState created OUTSIDE gen(): each epoch continues the stream (new order per epoch).
+        rng = np.random.RandomState(shuffle_seed) if shuffle_seed is not None else np.random
 
         def gen():
-            order = np.random.permutation(n) if shuffle else np.arange(n)
+            order = rng.permutation(n) if shuffle else np.arange(n)
             for start in range(0, n, batch_size):
                 index = order[start:start + batch_size]
                 yield (np.ascontiguousarray(feature_mmap[index]),
@@ -649,7 +651,7 @@ class PIEIntent(object):
                 loss=['binary_crossentropy'], metrics=['acc'], data_opts='',
                 monitor_metric='val_auc', monitor_mode='max',
                 early_stop_min_delta=0.0005, early_stop_patience=10,
-                seed=None, use_plateau=True, eval_every=5,
+                seed=None, shuffle_seed=None, use_plateau=True, eval_every=5,
                 plateau_patience=3, plateau_factor=0.5,
                 plateau_min_lr=1e-7, plateau_min_delta=1e-4):
             """
@@ -729,10 +731,16 @@ class PIEIntent(object):
                 val_mmap = self._ensure_feature_memmap(
                     val_d['images'], val_d['bboxes'], val_d['ped_ids'],
                     val_save_path, feature_shape, 'val')
+                self.visual_norm = None
+                if getattr(self, 'visual_norm_enabled', False):
+                    from visual_norm import fit_channel_stats, stats_space_for
+                    space = stats_space_for(getattr(self, 'capacity', None))
+                    print(f"[visual_norm] fitting statistics in '{space}' space")
+                    self.visual_norm = fit_channel_stats(train_mmap, space=space)
 
                 train_dataset = self._dataset_from_memmap(
                     train_mmap, train_d['decoder_input'], train_d['output'],
-                    batch_size, shuffle=True, repeat=True)
+                    batch_size, shuffle=True, repeat=True, shuffle_seed=shuffle_seed)
                 train_eval_dataset = self._dataset_from_memmap(
                     train_mmap, train_d['decoder_input'], train_d['output'],
                     batch_size, shuffle=False, repeat=False)
@@ -756,7 +764,8 @@ class PIEIntent(object):
             else:
                 print("[visual] use_visual=False: VGG16 not loaded, decoder-only input")
                 train_dataset = decoder_only_dataset(train_d['decoder_input'], train_d['output'],
-                                                     batch_size, shuffle=True, repeat=True)
+                                                     batch_size, shuffle=True, repeat=True,
+                                                     shuffle_seed=shuffle_seed)
                 train_eval_dataset = decoder_only_dataset(train_d['decoder_input'], train_d['output'],
                                                           batch_size, shuffle=False, repeat=False)
                 val_dataset = decoder_only_dataset(val_d['decoder_input'], val_d['output'],
@@ -840,6 +849,8 @@ class PIEIntent(object):
                 'temporal_encoder': getattr(self, 'temporal_encoder', None),
                 'temporal_hp': getattr(self, 'temporal_hp', None),
                 'use_visual': getattr(self, 'use_visual', True),
+                'capacity': getattr(self, 'capacity', None),
+                'visual_norm': getattr(self, 'visual_norm', None),
                 'zero_decoder_bbox': getattr(self, 'zero_decoder_bbox', False),
             }
             with open(hyperparams_path, 'w', encoding='utf-8') as fid:

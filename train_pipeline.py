@@ -23,8 +23,10 @@ import time
 
 from focal_loss import weighted_binary_crossentropy
 from log_mode import configure_tf_logging, is_full
-
+from capacity_budget import interactive_pick_capacity, capacity_tag
 from train_helpers import (
+    ensure_split_seed,
+    interactive_pick_seeds,
     Tee,
     PHASE_BALANCING,
     PHASE_BUILD_SEQUENCES,
@@ -62,6 +64,7 @@ from train_helpers import (
     interactive_pick_new_run_name,
     interactive_pick_pose_scale,
     interactive_pick_extra_norm,
+    interactive_pick_visual_norm,
     interactive_pick_feature_target,
     interactive_pick_fusion,
     interactive_pick_zero_decoder_bbox,
@@ -78,7 +81,7 @@ from train_helpers import (
     recompute_split_metrics_custom,
     resolve_balance_mode_preset,
 )
-
+from visual_norm import confirm_visual_pipeline, visual_experiment_code
 _CONSOLE = {}
 
 
@@ -110,6 +113,17 @@ def pick_run_options(hp):
 
     opts['zero_decoder_bbox'] = interactive_pick_zero_decoder_bbox(opts['use_visual'])
     print(f"[config] ZERO_DECODER_BBOX = {opts['zero_decoder_bbox']}")
+
+    while True:
+        opts['visual_norm'] = interactive_pick_visual_norm() if opts['use_visual'] else False
+        print(f"[config] VISUAL_NORM = {opts['visual_norm']}")
+
+        opts['capacity'] = interactive_pick_capacity() if opts['use_visual'] else None
+        print(f"[config] CAPACITY = {opts['capacity']}")
+
+        if not opts['use_visual'] or confirm_visual_pipeline(opts['visual_norm'], opts['capacity']):
+            break
+        print("[visual_pipeline] re-asking visual_norm and capacity.")
 
     opts['log_mode'] = interactive_pick_log_mode()
     print(f"[config] LOG_MODE = {opts['log_mode']}")
@@ -171,8 +185,14 @@ def pick_run_options(hp):
 
     opts['split_type'], opts['split_opts'], _ = interactive_pick_data_split()
     print(f"[config] data_split_type = {opts['split_type']}")
-    return opts
 
+    (opts['train_seed'], opts['shuffle_seed'],
+     opts['data_seed'], opts['split_seed']) = interactive_pick_seeds(
+        opts['split_type'], opts['balance_mode'], hp['seed'],
+        hp.get('data_seed', 42), hp.get('split_seed', 42))
+    print(f"[config] TRAIN_SEED={opts['train_seed']} SHUFFLE_SEED={opts['shuffle_seed']} "
+          f"DATA_SEED={opts['data_seed']} SPLIT_SEED={opts['split_seed']}")
+    return opts
 
 def _require_dir(path, family):
     """A family chosen in the menu must exist: attach_pose/attach_scene would silently write zeros."""
@@ -198,8 +218,9 @@ def prepare_data(opts, data_opts, pie_path):
 
     print_phase(PHASE_BUILD_SEQUENCES)
     imdb = PIE(data_path=pie_path)
+    ensure_split_seed(imdb, data_opts['data_split_type'], data_opts, opts['split_seed'])
     print_annotated_pedestrian_fields(imdb)
-    train, val, test = build_split_sequences(imdb, data_opts)
+    train, val, test = build_split_sequences(imdb, data_opts, carve_seed=opts['split_seed'])
 
     # Offline features: only read from disk when selected in the first menu.
     if 'pose' in offline:
@@ -222,7 +243,8 @@ def prepare_data(opts, data_opts, pie_path):
     print_phase(PHASE_BALANCING)
     train, val = apply_balancing_strategy(
         imdb, train, val, opts['balance_mode'], augment_pie_tracks,
-        val_augment_mode=(opts['val_augment_mode'] or 'undersample_val'))
+        val_augment_mode=(opts['val_augment_mode'] or 'undersample_val'),
+        data_seed=opts['data_seed'])
 
     if opts['balance_mode'] == 'augmentation' and (offline & {'pose', 'scene'}):
         print("[warning] augmentation mode: pose/scene of synthetic copies are only re-indexed, "
@@ -329,7 +351,7 @@ def choose_run_identity(opts, data, hp, pie_path):
         weight_decay=opts['weight_decay'],
         early_stop_min_delta=hp['es_min_delta'],
         early_stop_patience=hp['es_patience'],
-        seed=hp['seed'], rec_activation=opts['rec_act'],
+        seed=opts['train_seed'], rec_activation=opts['rec_act'],
         normalize_decoder_bbox=opts['normalize_bbox'],
         use_plateau=opts['use_plateau'], decoder_features=decoder_features,
         feature_target=opts['feature_target'], fusion=opts['fusion'],
@@ -345,6 +367,16 @@ def choose_run_identity(opts, data, hp, pie_path):
 
     if opts.get('zero_decoder_bbox'):
         short_tag = 'ZeroBbox_' + short_tag
+
+    if opts.get('visual_norm'):
+        log_first = bool((opts.get('capacity') or {}).get('log1p'))
+        short_tag = ('VNormLog_' if log_first else 'VNorm_') + short_tag
+    ctag = capacity_tag(opts.get('capacity'))
+    if ctag:
+        short_tag = ctag + short_tag
+
+    if opts.get('visual_norm'):
+        short_tag = 'VNorm_' + short_tag
 
     architecture = arch_name
     run_name = interactive_pick_new_run_name(
@@ -442,7 +474,14 @@ def start_run(opts, hp, data, ident, pie_path):
         ('run identity', [
             ('architecture', ident['architecture']),
             ('run_name (folder)', paths['run_folder_name']),
+            ('train_seed', opts.get('train_seed')),
+            ('shuffle_seed', opts.get('shuffle_seed')),
+            ('data_seed', opts.get('data_seed')),
+            ('split_seed', opts.get('split_seed')),
             ('use_visual', opts.get('use_visual')),
+            ('visual_norm', opts.get('visual_norm')),
+            ('visual_pipeline', visual_experiment_code(
+                        opts.get('visual_norm'), (opts.get('capacity') or {}).get('log1p'))),
             ('decoder_features', ident['decoder_features']),
             ('temporal_encoder', opts.get('temporal_encoder')),
             ('temporal_hp', opts.get('temporal_hp')),
@@ -485,6 +524,13 @@ def start_run(opts, hp, data, ident, pie_path):
     model.feature_norm = opts.get('feature_norm') or {}
     model.zero_decoder_bbox = opts.get('zero_decoder_bbox', False)
     model.use_visual = opts.get('use_visual', True)
+    model.capacity = opts.get('capacity')
+    cap = opts.get('capacity') or {}
+    if cap.get('hidden_units') and int(cap['hidden_units']) != model._num_hidden_units:
+        model._num_hidden_units = int(cap['hidden_units'])
+        print(f"[capacity] decoder hidden units overridden -> {model._num_hidden_units}")
+    model.visual_norm_enabled = bool(opts.get('visual_norm', False))
+    model.visual_norm = None
     model.extra_norm_stats = None
     print(f"[config] model.normalize_decoder_bbox = {model.normalize_decoder_bbox}")
     print(f"[config] branch_mode={model.branch_mode} temporal_fusion={model.temporal_fusion}")
@@ -518,7 +564,8 @@ def train_and_report(model, opts, hp, data, paths):
         monitor_mode=opts['monitor_mode'],
         early_stop_min_delta=hp['es_min_delta'],
         early_stop_patience=hp['es_patience'],
-        seed=hp['seed'],
+        seed=opts['train_seed'],
+        shuffle_seed=opts['shuffle_seed'],
         use_plateau=opts['use_plateau'],
         eval_every=opts['eval_every'],
         plateau_patience=hp.get('plateau_patience', 3),

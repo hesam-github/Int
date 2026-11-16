@@ -136,3 +136,26 @@ def composite_intent_loss(gamma=0.0, pos_weight=1.0, lam_rank=0.0, rank_delta=0.
         parts.append(f"s{eps_smooth}")
     composite_fixed.__name__ = "_".join(parts)
     return composite_fixed
+
+def bce_plus_focal_loss(gamma=2.0, focal_weight=1.0, alpha=None):
+    """loss = BCE + focal_weight * focal.
+
+    focal = (1 - p_t)^gamma * BCE, optionally times alpha_t.
+    alpha=None means no class weighting, which fits undersampled (50/50) data.
+    focal_weight=0 reproduces plain BCE; gamma=0 gives (1 + focal_weight) * BCE.
+    """
+    def bce_focal_fixed(y_true, y_pred):
+        y = tf.cast(tf.reshape(y_true, [-1]), tf.float32)
+        p = K.clip(tf.reshape(y_pred, [-1]), K.epsilon(), 1.0 - K.epsilon())
+        p_t = y * p + (1.0 - y) * (1.0 - p)
+        ce = -tf.math.log(p_t)
+        focal = tf.pow(1.0 - p_t, gamma) * ce
+        if alpha is not None:
+            focal = focal * (y * alpha + (1.0 - y) * (1.0 - alpha))
+        return tf.reduce_mean(ce + focal_weight * focal)
+
+    name = f"bce_focal_g{gamma}_w{focal_weight}"
+    if alpha is not None:
+        name += f"_a{alpha}"
+    bce_focal_fixed.__name__ = name
+    return bce_focal_fixed

@@ -28,11 +28,11 @@ use_visual=False -> decoder-only model, no VGG16 input at all.
 """
 import numpy as np
 import tensorflow as tf
-from keras.layers import Concatenate, ConvLSTM2D, Dense, Flatten, Input, LSTM, RepeatVector
+from keras.layers import Concatenate, ConvLSTM2D, Dense, Flatten, Input, LSTM, RepeatVector, Conv2D, TimeDistributed
 from keras.models import Model
-
+from visual_norm import ChannelStandardize, visual_op_order
 from utils import PIE_IMG_WIDTH, PIE_IMG_HEIGHT
-
+from visual_norm import ChannelStandardize
 
 class SliceColumns(tf.keras.layers.Layer):
     def __init__(self, start, end=None, **kwargs):
@@ -116,6 +116,14 @@ class BranchAttnPool(tf.keras.layers.Layer):
         config.update(n_branches=self.n_branches, return_weights=self.return_weights)
         return config
 
+class Log1p(tf.keras.layers.Layer):
+    """log(1 + max(x, 0)). VGG16 features are >= 0 after ReLU; the clamp only guards float noise."""
+
+    def call(self, x):
+        return tf.math.log1p(tf.maximum(x, 0.0))
+
+    def get_config(self):
+        return super().get_config()
 
 CUSTOM_OBJECTS = {
     'SliceColumns': SliceColumns,
@@ -123,6 +131,8 @@ CUSTOM_OBJECTS = {
     'BranchAttention': BranchAttention,
     'AdditiveTemporalAttention': AdditiveTemporalAttention,
     'BranchAttnPool': BranchAttnPool,
+    'ChannelStandardize': ChannelStandardize,
+    'Log1p': Log1p,
 }
 
 
@@ -227,6 +237,8 @@ def restore_routing(model, hyperparams):
     model.extra_norm_stats = hyperparams.get('extra_norm_stats')
     model.feature_norm = hyperparams.get('feature_norm')
     model.use_visual = hyperparams.get('use_visual', True)
+    model.capacity = hyperparams.get('capacity')
+    model.visual_norm = hyperparams.get('visual_norm')
     model.pose_scale = hyperparams.get('pose_scale', 'bbox_relative')
     model.zero_decoder_bbox = hyperparams.get('zero_decoder_bbox', False)
     spans = hyperparams.get('feature_spans')
@@ -284,6 +296,23 @@ def build_intention_model(intent):
     else:
         maps = maps_in
 
+    vn = getattr(intent, 'visual_norm', None)
+    if getattr(intent, 'zero_visual', False):
+        vn = None
+    cap = getattr(intent, 'capacity', None) or {}
+
+    ops = visual_op_order(vn, cap)
+    print(f"[visual_pipeline] graph order: VGG -> {' -> '.join(ops) if ops else '(raw)'} -> ConvLSTM")
+    for op in ops:
+        if op == 'standardize':
+            maps = ChannelStandardize(vn['mean'], vn['std'], name='visual_standardize')(maps)
+        else:
+            maps = Log1p(name='log1p_input')(maps)
+
+    if cap.get('input_reduce'):
+        maps = TimeDistributed(Conv2D(cap['input_reduce'], 1, name='input_reduce_conv'),
+                            name='input_reduce')(maps)
+
     dec_in = Input(
         shape=(intent._decoder_seq_length, width),
         name='decoder_input')
@@ -293,6 +322,7 @@ def build_intention_model(intent):
         extra = SliceColumns(4, None, name='extra_slice_enc')(dec_in)
         maps = BroadcastExtraChannels(name='tile_extra')([maps, extra])
 
+    rs = bool(cap.get("return_sequences", False))
     conv = ConvLSTM2D(
         filters=intent._convlstm_num_filters,
         kernel_size=intent._convlstm_kernel_size,
@@ -301,9 +331,20 @@ def build_intention_model(intent):
         bias_regularizer=intent._bias_regularizer,
         dropout=intent._lstm_dropout,
         recurrent_dropout=intent._lstm_recurrent_dropout,
-        return_sequences=False,
+        return_sequences=rs,
         name='conv_lstm2d')(maps)
-    visual = Flatten(name='encoder_flatten')(conv)
+    if cap.get('encoder_reduce'):
+        if rs:
+            conv = TimeDistributed(
+                Conv2D(cap['encoder_reduce'], 1, name='encoder_reduce_conv'),
+                name='encoder_reduce')(conv)
+        else:
+            conv = Conv2D(cap['encoder_reduce'], 1, name='encoder_reduce')(conv)
+    if rs:
+        visual = TimeDistributed(Flatten(name='encoder_flatten'), name='td_flatten')(conv)
+        # visual shape: (B, T, flat)
+    else:
+        visual = Flatten(name='encoder_flatten')(conv)
 
     lstm_kw = dict(
         units=units,
@@ -316,9 +357,14 @@ def build_intention_model(intent):
         recurrent_activation=intent._lstm_recurrent_activation)
 
     if fusion == 'pie':
-        repeated = RepeatVector(intent._decoder_seq_length)(visual)
-        side = bbox if target == 'encoder' else dec_in
-        fused = Concatenate(axis=2, name='concatenate')([repeated, side])
+        if rs:
+            # visual is already (B, T, flat); no RepeatVector needed
+            side = bbox if target == 'encoder' else dec_in
+            fused = Concatenate(axis=2, name='concatenate')([visual, side])
+        else:
+            repeated = RepeatVector(intent._decoder_seq_length)(visual)
+            side = bbox if target == 'encoder' else dec_in
+            fused = Concatenate(axis=2, name='concatenate')([repeated, side])
         hidden = LSTM(name='decoder_network', **lstm_kw)(fused)
 
     elif fusion == 'pcpa':
