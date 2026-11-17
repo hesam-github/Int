@@ -1,0 +1,26 @@
+﻿# IDE
+.vscode/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Data and experiments
+data/
+backup/
+runs/
+runs_*/
+runs*/
+diagnostics_out/
+
+# Practice folders
+pie_data_practice/
+pie_dataset_practice/
+not imp codes/
+
+# Large model files
+*.pt
+
+# Other files
+*.ipynb
+desktop.ini
