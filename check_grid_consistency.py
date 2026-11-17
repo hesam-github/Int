@@ -139,7 +139,9 @@ def main(cond, split):
                 print(f"   {key}: first divergence at epoch {idx[0] + 1}, |diff| = {d[idx[0]]:.3g}")
 
 
-if __name__ == "__main__":
+'''if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit("usage: python check_grid_consistency.py <cond> <split>")
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2])'''
+
+git remote -v

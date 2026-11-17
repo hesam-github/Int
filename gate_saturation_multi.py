@@ -25,6 +25,7 @@ from tensorflow.keras.models import Model, load_model
 
 from feature_routing import CUSTOM_OBJECTS, restore_routing
 from pie_intent_experiment import PIEIntentExperiment
+from visual_norm import apply_visual_ops_np, visual_op_order
 
 MAX_WINDOWS_PER_CHUNK = 256
 WINDOWS_PER_BATCH = 32
@@ -255,6 +256,7 @@ def analyse(run_dir):
     decomp = Decomposition(units)
 
     vn = hp.get("visual_norm")
+    print(f"[config] visual ops order: {visual_op_order(vn, hp.get('capacity')) or 'raw'}")
     v_mean = np.asarray(vn["mean"], np.float32) if vn else None
     v_std = np.asarray(vn["std"], np.float32) if vn else None
     conv_sub = Model(model.inputs[0], conv.output)
@@ -282,7 +284,7 @@ def analyse(run_dir):
                 model.predict([enc_b, dec_b], batch_size=len(enc_b), verbose=0).ravel())
 
             # Manual ConvLSTM (always done for verification + gate stats)
-            enc_n = enc_b if v_mean is None else (enc_b - v_mean) / v_std
+            enc_n = apply_visual_ops_np(enc_b, vn, hp.get('capacity'))
             visual_raw = convlstm_pass(enc_n, K, R_c, b_c,
                                        cc["recurrent_activation"], cc["activation"], gs_c)
             if not checked:

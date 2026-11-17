@@ -738,6 +738,12 @@ class PIEIntent(object):
                     print(f"[visual_norm] fitting statistics in '{space}' space")
                     self.visual_norm = fit_channel_stats(train_mmap, space=space)
 
+                self.percentile_scale = None
+                if getattr(self, 'use_percentile', False):
+                    from visual_percentile import fit_positive_percentile_scales
+                    print("[visual_percentile] fitting positive-percentile scales (q=99, train only)")
+                    self.percentile_scale = fit_positive_percentile_scales(train_mmap)
+
                 train_dataset = self._dataset_from_memmap(
                     train_mmap, train_d['decoder_input'], train_d['output'],
                     batch_size, shuffle=True, repeat=True, shuffle_seed=shuffle_seed)
@@ -851,6 +857,7 @@ class PIEIntent(object):
                 'use_visual': getattr(self, 'use_visual', True),
                 'capacity': getattr(self, 'capacity', None),
                 'visual_norm': getattr(self, 'visual_norm', None),
+                'percentile_scale': getattr(self, 'percentile_scale', None),
                 'zero_decoder_bbox': getattr(self, 'zero_decoder_bbox', False),
             }
             with open(hyperparams_path, 'w', encoding='utf-8') as fid:

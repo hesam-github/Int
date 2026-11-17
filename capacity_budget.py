@@ -131,6 +131,8 @@ def capacity_tag(spec):
         parts.append(f"H{spec['hidden_units']}")
     if spec.get("log1p"):
         parts.append("log1p")
+    if spec.get("percentile"):
+        parts.append("P99")
     if spec.get("return_sequences"):
         parts.append("RS")
         

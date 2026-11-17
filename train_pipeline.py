@@ -117,7 +117,12 @@ def pick_run_options(hp):
     while True:
         opts['visual_norm'] = interactive_pick_visual_norm() if opts['use_visual'] else False
         print(f"[config] VISUAL_NORM = {opts['visual_norm']}")
-
+        if opts['use_visual']:
+            raw = input("[visual_percentile] use positive-percentile scaling (q=99, no center/clip)? [y/N]: ").strip().lower()
+            opts['use_percentile'] = raw in ('y', 'yes')
+        else:
+            opts['use_percentile'] = False
+        print(f"[config] USE_PERCENTILE = {opts['use_percentile']}")
         opts['capacity'] = interactive_pick_capacity() if opts['use_visual'] else None
         print(f"[config] CAPACITY = {opts['capacity']}")
 
@@ -368,15 +373,13 @@ def choose_run_identity(opts, data, hp, pie_path):
     if opts.get('zero_decoder_bbox'):
         short_tag = 'ZeroBbox_' + short_tag
 
-    if opts.get('visual_norm'):
-        log_first = bool((opts.get('capacity') or {}).get('log1p'))
-        short_tag = ('VNormLog_' if log_first else 'VNorm_') + short_tag
     ctag = capacity_tag(opts.get('capacity'))
     if ctag:
         short_tag = ctag + short_tag
 
     if opts.get('visual_norm'):
-        short_tag = 'VNorm_' + short_tag
+        log_first = bool((opts.get('capacity') or {}).get('log1p'))
+        short_tag = ('VNormLog_' if log_first else 'VNorm_') + short_tag
 
     architecture = arch_name
     run_name = interactive_pick_new_run_name(
@@ -481,7 +484,7 @@ def start_run(opts, hp, data, ident, pie_path):
             ('use_visual', opts.get('use_visual')),
             ('visual_norm', opts.get('visual_norm')),
             ('visual_pipeline', visual_experiment_code(
-                        opts.get('visual_norm'), (opts.get('capacity') or {}).get('log1p'))),
+            opts.get('visual_norm'), (opts.get('capacity') or {}).get('log1p'))),
             ('decoder_features', ident['decoder_features']),
             ('temporal_encoder', opts.get('temporal_encoder')),
             ('temporal_hp', opts.get('temporal_hp')),
@@ -530,6 +533,8 @@ def start_run(opts, hp, data, ident, pie_path):
         model._num_hidden_units = int(cap['hidden_units'])
         print(f"[capacity] decoder hidden units overridden -> {model._num_hidden_units}")
     model.visual_norm_enabled = bool(opts.get('visual_norm', False))
+    model.use_percentile = bool(opts.get('use_percentile', False))
+    model.percentile_scale = None
     model.visual_norm = None
     model.extra_norm_stats = None
     print(f"[config] model.normalize_decoder_bbox = {model.normalize_decoder_bbox}")

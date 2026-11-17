@@ -33,6 +33,7 @@ from keras.models import Model
 from visual_norm import ChannelStandardize, visual_op_order
 from utils import PIE_IMG_WIDTH, PIE_IMG_HEIGHT
 from visual_norm import ChannelStandardize
+from visual_percentile import PositivePercentileScale
 
 class SliceColumns(tf.keras.layers.Layer):
     def __init__(self, start, end=None, **kwargs):
@@ -133,6 +134,7 @@ CUSTOM_OBJECTS = {
     'BranchAttnPool': BranchAttnPool,
     'ChannelStandardize': ChannelStandardize,
     'Log1p': Log1p,
+    'PositivePercentileScale': PositivePercentileScale,
 }
 
 
@@ -239,6 +241,7 @@ def restore_routing(model, hyperparams):
     model.use_visual = hyperparams.get('use_visual', True)
     model.capacity = hyperparams.get('capacity')
     model.visual_norm = hyperparams.get('visual_norm')
+    model.percentile_scale = hyperparams.get('percentile_scale')
     model.pose_scale = hyperparams.get('pose_scale', 'bbox_relative')
     model.zero_decoder_bbox = hyperparams.get('zero_decoder_bbox', False)
     spans = hyperparams.get('feature_spans')
@@ -308,7 +311,13 @@ def build_intention_model(intent):
             maps = ChannelStandardize(vn['mean'], vn['std'], name='visual_standardize')(maps)
         else:
             maps = Log1p(name='log1p_input')(maps)
-
+    # Optional positive-percentile scaling (no centering, no clipping)
+    pscale = getattr(intent, 'percentile_scale', None)
+    if pscale and not getattr(intent, 'zero_visual', False):
+        from visual_percentile import PositivePercentileScale
+        maps = PositivePercentileScale(pscale['scales'], name='visual_percentile')(maps)
+        print("[visual_pipeline] applied PositivePercentileScale")
+        
     if cap.get('input_reduce'):
         maps = TimeDistributed(Conv2D(cap['input_reduce'], 1, name='input_reduce_conv'),
                             name='input_reduce')(maps)
