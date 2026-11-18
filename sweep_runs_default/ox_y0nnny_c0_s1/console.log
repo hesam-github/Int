@@ -567,3 +567,135 @@ epoch  85 [val  ] accuracy=0.5887 majority_acc=0.5429 precision=0.5345 recall=0.
 epoch  86 loss: train=1.0686 val=1.1740   (train/test full metrics off)
 epoch  86 [val  ] accuracy=0.6003 majority_acc=0.5429 precision=0.5456 recall=0.7520 specificity=0.4726 balanced_acc=0.6123 f1=0.6324 auc=0.6913 ap=0.6263 nll=0.6616 ece=0.1087 pmean=0.557 pstd=0.121
 epoch  87 loss: train=1.0566 val=1.1715   (train/test full metrics off)
+epoch  87 [val  ] accuracy=0.6061 majority_acc=0.5429 precision=0.5498 recall=0.7631 specificity=0.4739 balanced_acc=0.6185 f1=0.6391 auc=0.6892 ap=0.6254 nll=0.6625 ece=0.1049 pmean=0.558 pstd=0.123
+epoch  88 loss: train=1.0506 val=1.1697   (train/test full metrics off)
+epoch  88 [val  ] accuracy=0.6112 majority_acc=0.5429 precision=0.5540 recall=0.7663 specificity=0.4806 balanced_acc=0.6234 f1=0.6431 auc=0.6863 ap=0.6211 nll=0.6640 ece=0.1072 pmean=0.560 pstd=0.127
+epoch  89 loss: train=1.0437 val=1.1695   (train/test full metrics off)
+epoch  89 [val  ] accuracy=0.5996 majority_acc=0.5429 precision=0.5436 recall=0.7727 specificity=0.4538 balanced_acc=0.6132 f1=0.6382 auc=0.6836 ap=0.6175 nll=0.6671 ece=0.1128 pmean=0.565 pstd=0.129
+epoch  90 loss: train=1.0349 val=1.1640   (train/test full metrics off)
+epoch  90 [val  ] accuracy=0.6126 majority_acc=0.5429 precision=0.5554 recall=0.7647 specificity=0.4846 balanced_acc=0.6247 f1=0.6435 auc=0.6846 ap=0.6159 nll=0.6649 ece=0.1156 pmean=0.560 pstd=0.130
+epoch  91 loss: train=1.0280 val=1.1655   (train/test full metrics off)
+epoch  91 [val  ] accuracy=0.6017 majority_acc=0.5429 precision=0.5453 recall=0.7758 specificity=0.4552 balanced_acc=0.6155 f1=0.6404 auc=0.6810 ap=0.6105 nll=0.6696 ece=0.1176 pmean=0.567 pstd=0.134
+epoch  92 loss: train=1.0197 val=1.1560   (train/test full metrics off)
+epoch  92 [val  ] accuracy=0.6265 majority_acc=0.5429 precision=0.5699 recall=0.7456 specificity=0.5261 balanced_acc=0.6359 f1=0.6460 auc=0.6862 ap=0.6151 nll=0.6631 ece=0.1114 pmean=0.559 pstd=0.136
+epoch  93 loss: train=1.0132 val=1.1566   (train/test full metrics off)
+epoch  93 [val  ] accuracy=0.6192 majority_acc=0.5429 precision=0.5623 recall=0.7536 specificity=0.5060 balanced_acc=0.6298 f1=0.6440 auc=0.6823 ap=0.6106 nll=0.6668 ece=0.1148 pmean=0.563 pstd=0.137
+epoch  94 loss: train=1.0052 val=1.1515   (train/test full metrics off)
+epoch  94 [val  ] accuracy=0.6257 majority_acc=0.5429 precision=0.5692 recall=0.7456 specificity=0.5248 balanced_acc=0.6352 f1=0.6456 auc=0.6841 ap=0.6139 nll=0.6647 ece=0.1147 pmean=0.561 pstd=0.139
+epoch  95 loss: train=1.0021 val=1.1516   (train/test full metrics off)
+epoch  95 [val  ] accuracy=0.6163 majority_acc=0.5429 precision=0.5598 recall=0.7520 specificity=0.5020 balanced_acc=0.6270 f1=0.6418 auc=0.6795 ap=0.6103 nll=0.6677 ece=0.1175 pmean=0.566 pstd=0.142
+epoch  96 loss: train=0.9927 val=1.1457   (train/test full metrics off)
+epoch  96 [val  ] accuracy=0.6374 majority_acc=0.5429 precision=0.5802 recall=0.7472 specificity=0.5448 balanced_acc=0.6460 f1=0.6532 auc=0.6812 ap=0.6129 nll=0.6647 ece=0.1095 pmean=0.560 pstd=0.142
+epoch  97 loss: train=0.9873 val=1.1430   (train/test full metrics off)
+epoch  97 [val  ] accuracy=0.6286 majority_acc=0.5429 precision=0.5727 recall=0.7393 specificity=0.5355 balanced_acc=0.6374 f1=0.6454 auc=0.6749 ap=0.6105 nll=0.6648 ece=0.1034 pmean=0.556 pstd=0.143
+epoch  98 loss: train=0.9834 val=1.1418   (train/test full metrics off)
+epoch  98 [val  ] accuracy=0.6185 majority_acc=0.5429 precision=0.5619 recall=0.7504 specificity=0.5074 balanced_acc=0.6289 f1=0.6426 auc=0.6761 ap=0.6144 nll=0.6664 ece=0.1090 pmean=0.561 pstd=0.144
+epoch  99 loss: train=0.9667 val=1.1402   (train/test full metrics off)
+epoch  99 [val  ] accuracy=0.6163 majority_acc=0.5429 precision=0.5605 recall=0.7440 specificity=0.5087 balanced_acc=0.6264 f1=0.6393 auc=0.6730 ap=0.6096 nll=0.6674 ece=0.1053 pmean=0.560 pstd=0.144
+epoch 100 loss: train=0.9654 val=1.1314   (train/test full metrics off)
+epoch 100 [val  ] accuracy=0.6265 majority_acc=0.5429 precision=0.5731 recall=0.7170 specificity=0.5502 balanced_acc=0.6336 f1=0.6370 auc=0.6792 ap=0.6122 nll=0.6613 ece=0.0970 pmean=0.552 pstd=0.144
+epoch 101 loss: train=0.9619 val=1.1310   (train/test full metrics off)
+epoch 101 [val  ] accuracy=0.6156 majority_acc=0.5429 precision=0.5608 recall=0.7329 specificity=0.5167 balanced_acc=0.6248 f1=0.6354 auc=0.6776 ap=0.6134 nll=0.6636 ece=0.1018 pmean=0.558 pstd=0.147
+epoch 102 loss: train=0.9554 val=1.1302   (train/test full metrics off)
+epoch 102 [val  ] accuracy=0.6148 majority_acc=0.5429 precision=0.5606 recall=0.7281 specificity=0.5194 balanced_acc=0.6238 f1=0.6335 auc=0.6748 ap=0.6119 nll=0.6654 ece=0.1019 pmean=0.558 pstd=0.150
+epoch 103 loss: train=0.9472 val=1.1282   (train/test full metrics off)
+epoch 103 [val  ] accuracy=0.6126 majority_acc=0.5429 precision=0.5587 recall=0.7266 specificity=0.5167 balanced_acc=0.6216 f1=0.6317 auc=0.6743 ap=0.6135 nll=0.6659 ece=0.1008 pmean=0.558 pstd=0.152
+epoch 104 loss: train=0.9376 val=1.1260   (train/test full metrics off)
+epoch 104 [val  ] accuracy=0.6068 majority_acc=0.5429 precision=0.5519 recall=0.7440 specificity=0.4913 balanced_acc=0.6177 f1=0.6337 auc=0.6771 ap=0.6170 nll=0.6663 ece=0.1077 pmean=0.562 pstd=0.154
+epoch 105 loss: train=0.9342 val=1.1156   (train/test full metrics off)
+epoch 105 [val  ] accuracy=0.6265 majority_acc=0.5429 precision=0.5756 recall=0.6963 specificity=0.5676 balanced_acc=0.6320 f1=0.6302 auc=0.6783 ap=0.6165 nll=0.6583 ece=0.0887 pmean=0.545 pstd=0.155
+epoch 106 loss: train=0.9309 val=1.1168   (train/test full metrics off)
+epoch 106 [val  ] accuracy=0.6206 majority_acc=0.5429 precision=0.5673 recall=0.7170 specificity=0.5395 balanced_acc=0.6283 f1=0.6334 auc=0.6776 ap=0.6172 nll=0.6619 ece=0.0942 pmean=0.551 pstd=0.157
+epoch 107 loss: train=0.9178 val=1.1174   (train/test full metrics off)
+epoch 107 [val  ] accuracy=0.6119 majority_acc=0.5429 precision=0.5581 recall=0.7250 specificity=0.5167 balanced_acc=0.6208 f1=0.6307 auc=0.6785 ap=0.6184 nll=0.6650 ece=0.1022 pmean=0.559 pstd=0.161
+epoch 108 loss: train=0.9072 val=1.1150   (train/test full metrics off)
+epoch 108 [val  ] accuracy=0.6141 majority_acc=0.5429 precision=0.5600 recall=0.7266 specificity=0.5194 balanced_acc=0.6230 f1=0.6325 auc=0.6796 ap=0.6202 nll=0.6649 ece=0.1030 pmean=0.560 pstd=0.162
+epoch 109 loss: train=0.9044 val=1.1121   (train/test full metrics off)
+epoch 109 [val  ] accuracy=0.6126 majority_acc=0.5429 precision=0.5603 recall=0.7091 specificity=0.5315 balanced_acc=0.6203 f1=0.6260 auc=0.6749 ap=0.6157 nll=0.6643 ece=0.0966 pmean=0.553 pstd=0.163
+epoch 110 loss: train=0.9021 val=1.1144   (train/test full metrics off)
+epoch 110 [val  ] accuracy=0.6199 majority_acc=0.5429 precision=0.5658 recall=0.7250 specificity=0.5315 balanced_acc=0.6282 f1=0.6355 auc=0.6714 ap=0.6099 nll=0.6690 ece=0.1002 pmean=0.557 pstd=0.166
+epoch 111 loss: train=0.8941 val=1.1081   (train/test full metrics off)
+epoch 111 [val  ] accuracy=0.6228 majority_acc=0.5429 precision=0.5700 recall=0.7122 specificity=0.5475 balanced_acc=0.6299 f1=0.6332 auc=0.6763 ap=0.6150 nll=0.6649 ece=0.0960 pmean=0.553 pstd=0.167
+epoch 112 loss: train=0.8862 val=1.1066   (train/test full metrics off)
+epoch 112 [val  ] accuracy=0.6199 majority_acc=0.5429 precision=0.5661 recall=0.7218 specificity=0.5341 balanced_acc=0.6280 f1=0.6345 auc=0.6782 ap=0.6167 nll=0.6656 ece=0.0987 pmean=0.555 pstd=0.172
+epoch 113 loss: train=0.8755 val=1.0997   (train/test full metrics off)
+epoch 113 [val  ] accuracy=0.6257 majority_acc=0.5429 precision=0.5740 recall=0.7027 specificity=0.5609 balanced_acc=0.6318 f1=0.6319 auc=0.6831 ap=0.6195 nll=0.6609 ece=0.0929 pmean=0.550 pstd=0.175
+epoch 114 loss: train=0.8681 val=1.0965   (train/test full metrics off)
+epoch 114 [val  ] accuracy=0.6243 majority_acc=0.5429 precision=0.5724 recall=0.7043 specificity=0.5569 balanced_acc=0.6306 f1=0.6315 auc=0.6810 ap=0.6189 nll=0.6599 ece=0.0894 pmean=0.546 pstd=0.176
+epoch 115 loss: train=0.8636 val=1.0970   (train/test full metrics off)
+epoch 115 [val  ] accuracy=0.6257 majority_acc=0.5429 precision=0.5729 recall=0.7122 specificity=0.5529 balanced_acc=0.6326 f1=0.6350 auc=0.6797 ap=0.6186 nll=0.6626 ece=0.0926 pmean=0.549 pstd=0.180
+epoch 116 loss: train=0.8575 val=1.0980   (train/test full metrics off)
+epoch 116 [val  ] accuracy=0.6235 majority_acc=0.5429 precision=0.5712 recall=0.7075 specificity=0.5529 balanced_acc=0.6302 f1=0.6321 auc=0.6743 ap=0.6157 nll=0.6656 ece=0.0921 pmean=0.549 pstd=0.184
+epoch 117 loss: train=0.8518 val=1.0963   (train/test full metrics off)
+epoch 117 [val  ] accuracy=0.6286 majority_acc=0.5429 precision=0.5772 recall=0.7011 specificity=0.5676 balanced_acc=0.6344 f1=0.6332 auc=0.6726 ap=0.6148 nll=0.6659 ece=0.0897 pmean=0.546 pstd=0.189
+epoch 118 loss: train=0.8427 val=1.1024   (train/test full metrics off)
+epoch 118 [val  ] accuracy=0.6156 majority_acc=0.5429 precision=0.5623 recall=0.7170 specificity=0.5301 balanced_acc=0.6236 f1=0.6303 auc=0.6705 ap=0.6151 nll=0.6741 ece=0.1029 pmean=0.558 pstd=0.194
+epoch 119 loss: train=0.8390 val=1.1004   (train/test full metrics off)
+epoch 119 [val  ] accuracy=0.6177 majority_acc=0.5429 precision=0.5645 recall=0.7170 specificity=0.5341 balanced_acc=0.6256 f1=0.6317 auc=0.6704 ap=0.6171 nll=0.6741 ece=0.0999 pmean=0.557 pstd=0.197
+[lr] epoch 119: ReduceLROnPlateau 1.000e-05 -> 5.000e-06 (takes effect from epoch 120)
+epoch 120 loss: train=0.8320 val=1.1004   (train/test full metrics off)
+epoch 120 [val  ] accuracy=0.6170 majority_acc=0.5429 precision=0.5641 recall=0.7138 specificity=0.5355 balanced_acc=0.6247 f1=0.6302 auc=0.6694 ap=0.6165 nll=0.6751 ece=0.0995 pmean=0.556 pstd=0.198
+epoch 121 loss: train=0.8246 val=1.0971   (train/test full metrics off)
+epoch 121 [val  ] accuracy=0.6214 majority_acc=0.5429 precision=0.5703 recall=0.6963 specificity=0.5582 balanced_acc=0.6273 f1=0.6271 auc=0.6693 ap=0.6163 nll=0.6728 ece=0.0948 pmean=0.551 pstd=0.199
+epoch 122 loss: train=0.8224 val=1.1004   (train/test full metrics off)
+epoch 122 [val  ] accuracy=0.6192 majority_acc=0.5429 precision=0.5664 recall=0.7122 specificity=0.5408 balanced_acc=0.6265 f1=0.6310 auc=0.6668 ap=0.6157 nll=0.6770 ece=0.1018 pmean=0.556 pstd=0.200
+epoch 123 loss: train=0.8215 val=1.1044   (train/test full metrics off)
+epoch 123 [val  ] accuracy=0.6105 majority_acc=0.5429 precision=0.5579 recall=0.7122 specificity=0.5248 balanced_acc=0.6185 f1=0.6257 auc=0.6619 ap=0.6106 nll=0.6820 ece=0.1010 pmean=0.558 pstd=0.201
+epoch 124 loss: train=0.8119 val=1.1026   (train/test full metrics off)
+epoch 124 [val  ] accuracy=0.6112 majority_acc=0.5429 precision=0.5593 recall=0.7043 specificity=0.5328 balanced_acc=0.6185 f1=0.6235 auc=0.6634 ap=0.6128 nll=0.6812 ece=0.1017 pmean=0.556 pstd=0.203
+[lr] epoch 124: ReduceLROnPlateau 5.000e-06 -> 2.500e-06 (takes effect from epoch 125)
+epoch 125 loss: train=0.8099 val=1.1051   (train/test full metrics off)
+epoch 125 [val  ] accuracy=0.6076 majority_acc=0.5429 precision=0.5553 recall=0.7107 specificity=0.5207 balanced_acc=0.6157 f1=0.6234 auc=0.6619 ap=0.6135 nll=0.6842 ece=0.1026 pmean=0.559 pstd=0.204
+epoch 126 loss: train=0.8107 val=1.1025   (train/test full metrics off)
+epoch 126 [val  ] accuracy=0.6148 majority_acc=0.5429 precision=0.5635 recall=0.6979 specificity=0.5448 balanced_acc=0.6214 f1=0.6236 auc=0.6629 ap=0.6129 nll=0.6820 ece=0.1016 pmean=0.555 pstd=0.204
+epoch 127 loss: train=0.8133 val=1.1047   (train/test full metrics off)
+epoch 127 [val  ] accuracy=0.6061 majority_acc=0.5429 precision=0.5544 recall=0.7043 specificity=0.5234 balanced_acc=0.6139 f1=0.6204 auc=0.6618 ap=0.6141 nll=0.6848 ece=0.1095 pmean=0.558 pstd=0.205
+Wrote history to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\history.pkl
+encoder seq length: 15
+L2 reg term now: 0.41994404792785645
+decoder seq length: 15
+model input shapes: [TensorShape([None, 15, 7, 7, 512]), TensorShape([None, 15, 4])]
+Model + configs saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit
+[note] per-epoch metrics below use seq_overlap_rate=0.5 (training overlap) -- NOT comparable to the overlap=1 final evaluation numbers below.
+
+========================================================================================================
+FULL PER-EPOCH METRICS (from history.pkl -- Keras' own History callback)
+========================================================================================================
+ epoch          loss      val_loss      accuracy  val_accuracy       val_nll       val_auc            lr
+     1        2.4872        2.5717        0.4845        0.4571        0.8576        0.5512         1e-05
+     2        2.4266        2.5158        0.5058        0.4571        0.8379        0.5393         1e-05
+     3        2.3882        2.4626        0.5021        0.4571        0.8204        0.5297         1e-05
+     4        2.3356        2.4122        0.5213        0.4571        0.8048        0.5271         1e-05
+     5        2.3000        2.3621        0.5157        0.4571        0.7889        0.5338         1e-05
+     6        2.2627        2.3148        0.5302        0.4571        0.7748        0.5389         1e-05
+     7        2.2260        2.2675        0.5285        0.4571        0.7602        0.5632         1e-05
+     8        2.1891        2.2253        0.5418        0.4571        0.7498        0.5948         1e-05
+     9        2.1566        2.1877        0.5457        0.4571        0.7431        0.6029         1e-05
+    10        2.1231        2.1525        0.5414        0.4571        0.7380        0.5735         1e-05
+    11        2.0914        2.1181        0.5515        0.4571        0.7331        0.5375         1e-05
+    12        2.0578        2.0862        0.5595        0.4571        0.7298        0.5257         1e-05
+    13        2.0272        2.0542        0.5593        0.4571        0.7259        0.5345         1e-05
+    14        1.9983        2.0236        0.5600        0.4571        0.7228        0.5487         1e-05
+    15        1.9704        1.9947        0.5620        0.4571        0.7202        0.5483         1e-05
+    16        1.9478        1.9689        0.5624        0.4571        0.7200        0.5517         1e-05
+    17        1.9210        1.9433        0.5668        0.4571        0.7196        0.5570         1e-05
+    18        1.8939        1.9182        0.5620        0.4571        0.7189        0.5595         1e-05
+    19        1.8673        1.8933        0.5765        0.4571        0.7179        0.5695         1e-05
+    20        1.8413        1.8689        0.5775        0.4571        0.7163        0.5675         1e-05
+    21        1.8185        1.8442        0.5740        0.4571        0.7138        0.5663         1e-05
+    22        1.7975        1.8225        0.5765        0.4571        0.7138        0.5671         1e-05
+    23        1.7764        1.8010        0.5724        0.4571        0.7132        0.5714         1e-05
+    24        1.7514        1.7789        0.5808        0.4578        0.7117        0.5813         1e-05
+    25        1.7319        1.7581        0.5817        0.4578        0.7106        0.5906         1e-05
+    26        1.7046        1.7369        0.5906        0.4557        0.7087        0.5963         1e-05
+    27        1.6890        1.7174        0.5914        0.4578        0.7078        0.6003         1e-05
+    28        1.6688        1.6981        0.5899        0.4578        0.7067        0.6024         1e-05
+    29        1.6514        1.6797        0.5829        0.4578        0.7058        0.6012         1e-05
+    30        1.6315        1.6615        0.5957        0.4578        0.7047        0.6104         1e-05
+    31        1.6175        1.6440        0.5846        0.4578        0.7038        0.6119         1e-05
+    32        1.6000        1.6267        0.5854        0.4586        0.7024        0.6132         1e-05
+    33        1.5889        1.6107        0.5786        0.4564        0.7020        0.6175         1e-05
+    34        1.5668        1.5937        0.5875        0.4593        0.7000        0.6186         1e-05
+    35        1.5541        1.5779        0.5881        0.4622        0.6988        0.6281         1e-05
+    36        1.5429        1.5617        0.5837        0.4629        0.6967        0.6268         1e-05
+    37        1.5269        1.5472        0.5889        0.4615        0.6958        0.6285         1e-05
