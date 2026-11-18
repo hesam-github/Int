@@ -275,10 +275,23 @@ def prepare_data(opts, data_opts, pie_path):
             attach_flow(split, flow_dir, verbose=(split is train))
 
     print_phase(PHASE_LOSS_FINALIZE)
+    from focal_loss import bce_plus_focal_loss   # import locally if not already at top
+
     if opts['loss_name'] == 'weighted_bce':
         pos_weight = compute_pos_weight_from_train(train)
         loss_name = f"weighted_bce_pw{pos_weight:.4f}"
         loss_fn = weighted_binary_crossentropy(pos_weight=pos_weight)
+    elif (isinstance(opts.get('loss_fn'), tuple)
+          and len(opts['loss_fn']) == 3
+          and opts['loss_fn'][0] == 'wbce_focal_auto'):
+        # automatic pos_weight for weighted_bce + focal
+        _, gamma, focal_weight = opts['loss_fn']
+        pos_weight = compute_pos_weight_from_train(train)
+        loss_fn = bce_plus_focal_loss(
+            gamma=gamma,
+            focal_weight=focal_weight,
+            pos_weight=pos_weight)
+        loss_name = loss_fn.__name__
     else:
         pos_weight = None
         loss_name = opts['loss_name']
