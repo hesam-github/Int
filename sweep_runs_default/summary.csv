@@ -1,7 +1,8 @@
-run_id,run_tag,cfg_id,seed,split,status,minutes,coherent,offline,use_visual,bbox_mode,visual_norm,percentile,capacity,log1p,rs,cap_E_I_H,error,rc
+run_id,run_tag,cfg_id,seed,split,status,minutes,coherent,offline,use_visual,bbox_mode,visual_norm,percentile,capacity,log1p,rs,cap_E_I_H,error,rc,run_dir,n_epochs_run,best_epoch,train_roc_auc,train_pr_auc,train_accuracy,train_balanced_acc,train_f1,train_nll,train_ece,train_n_test_samples,train_f1_cal,train_acc_cal,val_roc_auc,val_pr_auc,val_accuracy,val_balanced_acc,val_f1,val_nll,val_ece,val_n_test_samples,val_f1_cal,val_acc_cal,test_roc_auc,test_pr_auc,test_accuracy,test_balanced_acc,test_f1,test_nll,test_ece,test_n_test_samples,test_f1_cal,test_acc_cal,cal_threshold,val_auc_lo,val_auc_hi,val_n_peds,test_auc_lo,test_auc_hi,test_n_peds
 ox_y0ynnn_c1_s1,he0faefcd,ox_y0ynnn_c1,1,default,failed,1.99,True,none,y,0,y,n,1,n,n,8-0-128,"ure on CUDNN engine 5#TC: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 480247808 bytes.
   Profiling failure on CUDNN engine 5: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 480247808 bytes.
 	 [[{{node model/conv_lstm2d/convolution}}]] [Op:__inference_train_function_10644]
-",
-o0_y0ynnn_c1_s1,,o0_y0ynnn_c1,1,,crashed,,,,,,,,,,,,,3221226505.0
-o1_y0ynnn_c1_s1,,o1_y0ynnn_c1,1,,interrupted,,,,,,,,,,,,,
+",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+o0_y0ynnn_c1_s1,,o0_y0ynnn_c1,1,,crashed,,,,,,,,,,,,,3221226505.0,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+o1_y0ynnn_c1_s1,,o1_y0ynnn_c1,1,,interrupted,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+ox_y0nnnn_c0_s1,h0c60ebe3,ox_y0nnnn_c0,1,default,ok,106.85,True,,y,0,n,n,0,n,n,0-0-128,,,D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h0c60ebe3_s1_PIE1_Dec_bbox_context_defaultSplit,123.0,113.0,0.8931333559800336,0.8815502614146055,0.8544520547945206,0.8543973493112137,0.8513176382875004,0.46682746542019526,0.15650021263987807,35624.0,0.7739313310806021,0.7314450931955985,0.6869364707630286,0.6262471170944359,0.6351935858212892,0.6390732310664897,0.6310285958173282,0.6551200774130269,0.08194189495345636,9479.0,0.640135192226447,0.55069100116046,0.7572618660876784,0.9217710761534683,0.7638576478149101,0.6932954097384867,0.8481584792602924,0.5035017832796208,0.18594190038520378,49792.0,0.9043360308993931,0.8328647172236504,0.32000000000000006,0.5930354640713958,0.7771622978259709,124.0,0.7117416111856573,0.8017971662558051,714.0
