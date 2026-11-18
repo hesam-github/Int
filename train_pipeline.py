@@ -275,7 +275,7 @@ def prepare_data(opts, data_opts, pie_path):
             attach_flow(split, flow_dir, verbose=(split is train))
 
     print_phase(PHASE_LOSS_FINALIZE)
-    from focal_loss import bce_plus_focal_loss   # import locally if not already at top
+    from focal_loss import bce_plus_focal_loss
 
     if opts['loss_name'] == 'weighted_bce':
         pos_weight = compute_pos_weight_from_train(train)
@@ -284,7 +284,6 @@ def prepare_data(opts, data_opts, pie_path):
     elif (isinstance(opts.get('loss_fn'), tuple)
           and len(opts['loss_fn']) == 3
           and opts['loss_fn'][0] == 'wbce_focal_auto'):
-        # automatic pos_weight for weighted_bce + focal
         _, gamma, focal_weight = opts['loss_fn']
         pos_weight = compute_pos_weight_from_train(train)
         loss_fn = bce_plus_focal_loss(
@@ -297,7 +296,6 @@ def prepare_data(opts, data_opts, pie_path):
         loss_name = opts['loss_name']
         loss_fn = opts['loss_fn']
     print(f"[config] LOSS_FUNCTION (final) = {loss_name}")
-
     return dict(imdb=imdb, train=train, val=val, test=test, data_opts=data_opts,
                 loss_name=loss_name, loss_fn=loss_fn, pos_weight=pos_weight)
 

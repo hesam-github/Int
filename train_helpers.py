@@ -1108,7 +1108,7 @@ def interactive_pick_loss_choice(balance_mode=None):
           "augmentation is applied)", flush=True)
     print("  [3] composite            (CE + optional focal / smoothing / confidence / ranking)", flush=True)
 
-    print("  [4] bce_plus_focal       (BCE + weight * focal, summed)", flush=True)
+    print("  [4] weighted_bce + focal  (weighted BCE + focal; pos_weight automatic or custom)", flush=True)
 
     while True:
         raw = input("[loss_function] enter a number from the list above [default: 0]: ").strip()
