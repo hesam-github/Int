@@ -1,0 +1,792 @@
+
+[offline_features] use the features you processed offline?
+  [n] none  -- no disk reads at all (fastest; bbox / velocity / annotation features only)
+  [a] all
+  [0] pose: YOLO keypoints (extra/pose)
+  [1] scene: SegFormer label maps -> 24-d scene vector (extra/scene)
+  [2] flow: optical flow summaries (extra/flow)
+  Enter comma-separated indices (e.g. 0,2), 'a' or 'n'. [default: all]
+[feeder] interactive_pick_offline_features <- 'n'
+[config] OFFLINE_FEATURES = []
+
+[use_visual] does the model need the VGG16 image context?
+  [n] no  -- VGG16 is NOT loaded. Decoder only (bbox, velocity, annotations, offline pose/scene/flow).
+  [y] yes -- VGG16 context feeds the ConvLSTM encoder. Slow: extracts features for every frame.  <-- default
+[feeder] interactive_pick_use_visual <- 'y'
+[config] USE_VISUAL = True
+
+[bbox_mode] decoder bbox columns:
+  [0] normal: bbox used as selected  <-- default
+  [1] zero: bbox columns = 0 (visual-only diagnostic; bbox_branch is zeroed too)
+      note: the VGG crop is still cut around the person, so it still encodes position and size
+[feeder] interactive_pick_zero_decoder_bbox <- '0'
+[config] ZERO_DECODER_BBOX = False
+
+[visual_norm] standardize VGG16 conv5 maps per channel before the ConvLSTM?
+  [n] no  -- raw VGG16 activations, as cached  <-- default
+  [y] yes -- (x - mean_train) / std_train per channel; statistics from TRAIN only
+[feeder] interactive_pick_visual_norm <- 'n'
+[config] VISUAL_NORM = False
+[feeder] visual_percentile <- 'y'
+[config] USE_PERCENTILE = True
+
+[capacity] presets for the visual branch (every choice except the baseline deviates from the paper):
+  [0] baseline (paper design)  <-- default
+  [1] A: 1x1 bottleneck after ConvLSTM (64 -> 8)
+  [2] B: 1x1 input projection (512 -> 64)
+  [3] A+B
+  [4] A+B with decoder hidden units 64
+  [5] custom (asked step by step)
+[feeder] interactive_pick_capacity <- '0'
+[feeder] interactive_pick_capacity <- 'n'
+[feeder] interactive_pick_capacity <- 'n'
+
+[capacity] parameter budget (visual branch + decoder):
+  ConvLSTM2D 512 -> 64, kernel 2, valid                      590,080
+  decoder LSTM in=2308 (flat 2304 + bbox 4), units=128     1,247,744
+  decoder Dense 128 -> 1                                         129
+  ------------------------------------------------------------------
+  TOTAL                                                    1,837,953
+  share of baseline                                           100.0%
+[capacity] decoder LSTM input width = 2308
+[capacity] baseline selected: this is the paper design, no capacity change.
+[capacity] reminder: any reduction deviates from the paper. Report it as an ablation and compare with a parameter-matched bbox-only control.
+[config] CAPACITY = {'convlstm_filters': 64, 'log1p': False, 'encoder_reduce': 0, 'input_reduce': 0, 'hidden_units': 128, 'return_sequences': False}
+
+[visual_pipeline] experiment A: VGG -> ConvLSTM  (raw)
+
+[log_mode] choose console verbosity for this run:
+  [0] clean  (phase explanations + meaningful metrics only (recommended))  <-- default
+  [1] full  (everything, including raw config dumps (original behavior))
+[feeder] interactive_pick_log_mode <- '0'
+[config] LOG_MODE = clean
+
+[balance_mode] existing balancing strategies:
+  [0] augmentation  (custom method -- geometric + photometric + temporal (shift/speed/occlusion) + micro-jitter)  <-- default
+  [1] undersample_base_article  (PIEPredict-style undersampling (not verified identical to the reference code))
+  [2] none  (no balancing -- raw imbalanced train/val (use with weighted_bce/focal_loss))
+[feeder] interactive_pick_balance_mode <- '1'
+[config] BALANCE_MODE = undersample_base_article
+
+[monitor_metric] choose what EarlyStopping/Checkpoint/Plateau monitor:
+  [0] val_nll (min)  -- validation NLL, data term only (no L2)  <-- default
+  [1] val_auc (max)  -- validation ROC-AUC
+  [2] val_loss (min)  -- validation loss incl. L2 (not a generalization metric)
+[feeder] interactive_pick_monitor_metric <- '2'
+[config] MONITOR_METRIC = val_loss (mode=min)
+
+[loss_function] choose the training loss function:
+  [0] binary_crossentropy  (standard BCE loss)  <-- default
+  [1] focal_loss           (focal loss for class imbalance)
+  [2] weighted_bce         (pos_weight computed AUTOMATICALLY from the train split's real class counts, after balancing/augmentation is applied)
+  [3] composite            (CE + optional focal / smoothing / confidence / ranking)
+  [4] bce_plus_focal       (BCE + weight * focal, summed)
+[feeder] interactive_pick_loss_choice <- '0'
+[config] LOSS_FUNCTION (family) = binary_crossentropy
+
+[weight_decay] RMSprop weight_decay in TF 2.10.1 / Keras 2.10.0:
+  NOT SUPPORTED. Keras 2.10.0's RMSprop has no 'weight_decay' argument -- any non-zero value crashes at optimizer construction.
+  L2 regularization in this project comes from REGULARIZER_VAL (kernel/recurrent/bias regularizers), which is unaffected by this.
+[feeder] interactive_pick_weight_decay <- ''
+[weight_decay] weight_decay = 0.0
+[config] WEIGHT_DECAY = 0.0
+
+[lstm_recurrent_activation]
+  1) sigmoid       (current code default)
+  2) hard_sigmoid  (official model.h5)
+[feeder] interactive_pick_lstm_recurrent_activation <- '2'
+
+[normalize_bbox] decoder bbox representation:
+  [0] raw pixels (x1, y1, x2, y2). Same as earlier runs; large values saturate the gates
+  [1] centre-x/W, ground-y/H, log(h/H)/5, log(w/W)/5. Keeps size and ground-position cues
+  (default: [1])
+[feeder] interactive_pick_normalize_bbox <- '0'
+[config] normalize_decoder_bbox = False
+[feeder] plateau <- 'y'
+[config] LSTM_REC_ACT=hard_sigmoid NORM_BBOX=False USE_PLATEAU=True
+
+[eval_every] how often to compute full train/test metrics during training:
+  [0] every epoch
+  [1] every 5 epochs  <-- default
+  [2] every 10 epochs
+  [3] custom N
+  [4] never (train/test full metrics off; val still every epoch)
+[feeder] interactive_pick_eval_every <- '4'
+[config] EVAL_EVERY = never
+[config] POSE_SCALE = bbox_relative  POSE_MIN_HEIGHT = 0
+[feeder] tte <- 'n'
+[config] USE_TTE = False
+[config] preset=undersample_base_article: lr=1e-05 clip_type=none clip_amount=None batch_size=64 normalize_decoder_bbox=False
+[config] CLIP_TYPE = none  CLIP_AMOUNT = None
+[config] BATCH_SIZE = 64  (hp requested 64)
+
+[data_split_type] existing split strategies (verified against pie_data.py):
+  [0] default  (fixed video-SET split: train=[set01,02,04] val=[set05,06] test=[set03] -- matches aras62/PIEPredict/train_test.py CODE (not the paper's stated random 50/40/10 text))  <-- default
+  [1] random  (random PEDESTRIAN-id split, ratios you choose -- matches the paper TEXT's described 50/40/10 protocol)
+  [2] kfold  (k-fold pedestrian-id split -- PIE only gives train/test per fold, val must be carved out of train manually (handled automatically below))
+[feeder] interactive_pick_data_split <- '0'
+[config] data_split_type = default
+
+[seed] independent seeds:
+  train  : weight init, dropout masks
+  shuffle: epoch order of training windows (Enter = same as train seed)
+  data   : undersampling / augmentation draws
+[feeder] interactive_pick_seeds <- '1'
+[feeder] interactive_pick_seeds <- ''
+[feeder] interactive_pick_seeds <- '42'
+  split  : not used (default split is fixed by video sets)
+[config] TRAIN_SEED=1 SHUFFLE_SEED=1 DATA_SEED=42 SPLIT_SEED=42
+
+>>> Building train/val/test sequences
+    Loads or builds the (train, val, test) pedestrian tracks according to data_split_type -- cached to disk by content hash, so repeated runs with identical settings are instant.
+D:\PIE codes\PIE_dataset\annotations\set01\video_0001_annt.xml
+[annotations] video set01/video_0001
+[annotations] per-frame pedestrian fields: ['bbox', 'occlusion', 'action', 'cross', 'gesture', 'look']
+[annotations] center is computed from bbox, not stored in the XML
+[annotations] obd_speed and gps_speed belong to the vehicle, not the pedestrian
+Building train/val sequences...
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_train_6f0c86110d467b31.pkl
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_val_44158d841427814d.pkl
+Building test sequence...
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_test_85a2ec5407cc03fe.pkl
+tracks=880  min_len=10  max_len=435
+tracks shorter than 0: 0
+
+>>> Applying balance strategy
+    Controls whether the RAW class imbalance in train/val is kept as-is (relying on the loss function to compensate), fixed by discarding majority-class samples (undersampling), or fixed by generating synthetic minority-class copies (augmentation).
+Balancing train/val via UNDERSAMPLING (data_seed=42)...
+---------------------------------------------------------
+Balancing the number of positive and negative intention samples
+Unbalanced: 	 Positive: 639 	 Negative: 241
+Balanced:	 Positive: 241  	 Negative: 241
+
+---------------------------------------------------------
+Balancing the number of positive and negative intention samples
+Unbalanced: 	 Positive: 181 	 Negative: 62
+Balanced:	 Positive: 62  	 Negative: 62
+
+[flow] not selected: nothing loaded
+
+>>> Finalizing the loss function
+    For weighted_bce, pos_weight is computed HERE from the TRAIN split's real, final class counts (after any balancing above) -- never from val/test, and never a hardcoded guess.
+[config] LOSS_FUNCTION (final) = binary_crossentropy
+[config] DATA_SPLIT_TAG = defaultSplit
+
+[feature check] numeric / empty / class gap:
+  bbox: dim=4 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=301.1675 max|mean_pos-mean_neg|=nan
+  center: dim=2 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=296.4361 max|mean_pos-mean_neg|=nan
+  occlusion: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.566 std=0.3783 max|mean_pos-mean_neg|=nan
+  gesture: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.994 std=0.0900 max|mean_pos-mean_neg|=nan
+  look: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.620 std=0.2954 max|mean_pos-mean_neg|=nan
+  action: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.471 std=0.4626 max|mean_pos-mean_neg|=nan
+  cross: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.944 std=0.1284 max|mean_pos-mean_neg|=nan
+  velocity: dim=4 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=0.0155 max|mean_pos-mean_neg|=nan
+
+[decoder_features] decoder input = bbox (always) + optional extras:
+  [0] bbox only  (raw bbox, 4 numbers; plus VGG16 context)  <-- default
+  [1] +center  (2 numbers per frame)  -- derived from bbox, redundant
+  [2] +occlusion  (1 numbers per frame)
+  [3] +gesture  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [4] +look  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [5] +action  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [6] +cross  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [7] +velocity  (4 numbers per frame)
+  [8] +bbox_branch  (4 numbers per frame)  -- separate copy of the raw bbox, its own parallel branch (scaling asked next)
+[feeder] interactive_pick_decoder_features <- '0'
+[config] decoder_input_type = ['bbox']
+
+[extra_norm] scaling of pose/occlusion/scene columns (not bbox):
+  [0] none: leave extras as attach_* wrote them.  <-- default
+  [1] zscore: train mean/std on extra columns only, applied to val and test. Bbox is still raw, so bbox can still dominate.
+[feeder] interactive_pick_extra_norm <- '0'
+
+--- Architecture ---
+  1. pie_convlstm * — PIE paper: ConvLSTM on VGG + single LSTM on bbox/decoder
+  2. bbox_only — BBox-only baseline (zero visual features, LSTM on bbox)
+  3. pcpa — PCPA-style: visual branch + bbox LSTM + shared extras + attention
+  4. branchattn — Branch attention. Sub-menu: static_pool, temporal_concat, or core_plus_extras
+  5. branchattn_temporal — Same sub-menu as branchattn. Temporal attention is only inside extra branches of core_plus_extras
+  6. encoder_extras — Extras tiled into ConvLSTM channels (feature_target=encoder)
+  7. both — Extras in both ConvLSTM channels and decoder LSTM
+  8. temporal_encoders — PIE decoder + selectable temporal visual encoder (ConvLSTM2D / Transformer / S4 / S4D / Mamba)
+[feeder] interactive_pick_architecture <- '1'
+[config] ARCHITECTURE  = pie_convlstm
+[config] FUSION        = pie
+[config] FEATURE_TARGET= decoder
+[config] ZERO_VISUAL   = False
+[config] EXTRA_NORM    = none
+[config] FEATURE_NORM  = {}
+[config] TEMPORAL_ENCODER = None
+[config] TEMPORAL_HP      = {}
+[config] USE_TTE  = False
+[config] FLOW_FEATURES   = []
+
+[run_name] existing run folders under:
+  D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm
+  [0] PIE1_Dec_bbox_context_randomSplit
+  [1] PIE1_Dec_bbox_context_randomSplit_run2
+  [2] PIE1_Dec_bbox_context_randomSplit_run3
+  [3] PIE1_Dec_bbox_context_defaultSplit
+  [4] PIE1_Dec_bbox_context_randomSplit_run4
+  [5] PIE1_Dec_bbox_context_randomSplit_run5
+  [6] PIE1_Dec_bbox_context_randomSplit_run6
+  [7] patience5_PIE1_Dec_bbox_context_randomSplit
+  [8] normbbox_PIE1_Dec_bbox_context_randomSplit
+  [9] bboxOnly_NoVis_PIE1_Dec_bbox_randomSplit
+  [10] bbox_only_NoVis_PIE1_Dec_bbox_randomSplit
+  [11] bboxOnly_NoVis_PIE1_Dec_bbox_randomSplit_run2
+  [12] bbb_NoVis_PIE1_Dec_bbox_randomSplit
+  [13] PIE1_Dec_bbox_context_randomSplit_run7
+  [14] 3_PIE1_Dec_bbox_context_defaultSplit
+  [15] 3_PIE1_Dec_bbox_context_defaultSplit_run2
+  [16] visonly_ZeroBbox_PIE1_Dec_bbox_context_randomSplit
+  [17] visonly_ZeroBbox_PIE1_Dec_bbox_context_randomSplit_run2
+  [18] visonly_ZeroBbox_PIE1_Dec_bbox_context_randomSplit_run3
+  [19] grid_full_raw_default_s42_PIE1_Dec_bbox_context_defaultSplit
+  [20] grid_full_norm_default_s42_PIE1_Dec_bbox_context_defaultSplit
+  [21] grid_full_norm_default_s42_PIE1_Dec_bbox_context_defaultSplit_run2
+  [22] grid_vis_only_default_s42_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit
+  [23] grid_bbox_raw_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit
+  [24] grid_bbox_norm_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit
+  [25] grid_full_raw_random_s42_PIE1_Dec_bbox_context_randomSplit
+  [26] grid_full_norm_random_s42_PIE1_Dec_bbox_context_randomSplit
+  [27] grid_vis_only_random_s42_ZeroBbox_PIE1_Dec_bbox_context_randomSplit
+  [28] grid_bbox_raw_random_s42_NoVis_PIE1_Dec_bbox_randomSplit
+  [29] grid_bbox_norm_random_s42_NoVis_PIE1_Dec_bbox_randomSplit
+  [30] grid_full_raw_default_s42_PIE1_Dec_bbox_context_defaultSplit_run2
+  [31] grid_full_norm_default_s42_PIE1_Dec_bbox_context_defaultSplit_run3
+  [32] grid_vis_only_default_s42_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit_run2
+  [33] grid_bbox_raw_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit_run2
+  [34] grid_bbox_norm_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit_run2
+  [35] grid_full_raw_random_s42_PIE1_Dec_bbox_context_randomSplit_run2
+  [36] grid_full_norm_random_s42_PIE1_Dec_bbox_context_randomSplit_run2
+  [37] grid_vis_only_random_s42_ZeroBbox_PIE1_Dec_bbox_context_randomSplit_run2
+  [38] grid_bbox_raw_random_s42_NoVis_PIE1_Dec_bbox_randomSplit_run2
+  [39] grid_bbox_norm_random_s42_NoVis_PIE1_Dec_bbox_randomSplit_run2
+  [40] grid_full_raw_vnorm_default_s42_VNorm_PIE1_Dec_bbox_context_defaultSplit
+  [41] grid_full_norm_vnorm_default_s42_VNorm_PIE1_Dec_bbox_context_defaultSplit
+  [42] grid_vis_only_vnorm_default_s42_VNorm_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit
+  [43] A__VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [44] A__VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [45] A_normbbox_VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [46] bce_focal_VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [47] A_bce_focal_valloss_VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [48] 30Len_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [49] 30frams_base_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [50] seed1_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [51] BASE_seed1_Cap_log1p_PIE1_Dec_bbox_context_randomSplit
+  [52] BASE_seed1_1_PIE1_Dec_bbox_context_randomSplit
+  [53] seed_1111_return_sequencesTrue_Cap_RS_PIE1_Dec_bbox_context_randomSplit
+  [54] vggNorm_VNorm_VNorm_PIE1_Dec_bbox_context_randomSplit
+  [55] A_normvis_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [56] Aonly_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [57] A_visNorm_PERCENTILEQ9_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [58] he0faefcd_s1_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [59] Base_PIE1_Dec_bbox_context_defaultSplit
+  [60] Cap_RS_PIE1_Dec_bbox_context_defaultSplit
+  [61] he0faefcd_s1_VNorm_Cap_E8_PIE1_Dec_bbox_context_defaultSplit
+  [62] h17fd023a_s1_VNorm_Cap_E8_PIE1_Dec_bbox_context_pose_defaultSplit
+  [63] h0c60ebe3_s1_PIE1_Dec_bbox_context_defaultSplit
+  [64] hbb9933dd_s1_NoVis_PIE1_Dec_bbox_defaultSplit
+  [65] hee028816_s1_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit
+[feeder] interactive_pick_new_run_name <- 'h09b71c73_s1'
+
+[config] ARCHITECTURE = pie_convlstm
+[config] RUN_NAME     = h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit
+[seed] TF op determinism ENABLED
+Run dir      -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit
+Console log  -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\logs\console_18Nov2026-14h47m14s.txt
+[choices] saved to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\choices.json
+
+--- architecture hyperparams ---
+hidden_units          -> 128
+convlstm_filters      -> 64
+convlstm_kernel       -> 2
+regularizer_val       -> 0.001
+lstm_dropout          -> 0.4
+lstm_rec_dropout      -> 0.2
+lstm_rec_activation   -> hard_sigmoid
+branch_mode           -> None
+aux_loss_weight       -> 0.0
+
+--- optimizer/training hyperparams ---
+lr                    -> 1e-05
+clip_type             -> none
+clip_amount           -> None
+weight_decay          -> 0.0
+batch_size            -> 64
+es_min_delta          -> 0.0001
+es_patience           -> 10
+use_plateau           -> True
+monitor_metric        -> val_loss (mode=min)
+loss                  -> binary_crossentropy
+
+--- data hyperparams ---
+data_split_type       -> default
+balance_mode          -> undersample_base_article
+val_augment_mode      -> None
+normalize_decoder_bbox-> False
+pose_scale            -> bbox_relative
+feature_target        -> decoder
+fusion                -> pie
+extra_norm            -> none
+feature_norm          -> {}
+zero_visual           -> False
+[summary] written to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\run_summary.txt
+
+GPUs visible to TF: [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+Running with GPU enabled.
+[config] temporal_encoder = None
+[config] model.normalize_decoder_bbox = False
+[config] branch_mode=None temporal_fusion=pie_concat
+[config] routing fusion=pie target=decoder extra_norm=none pose_scale=bbox_relative zero_visual=False use_visual=True
+PIEIntentExperiment(framework='tensorflow', architecture='pie_convlstm', run_name='h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit', run_dir='D:\\PIE codes\\PIE_dataset\\experiments\\tensorflow\\pie_convlstm\\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit')
+Epochs for this run -> 400
+
+>>> Training
+    Runs model.fit() with early stopping and checkpointing on the chosen monitor metric. Per-epoch train/val/test metrics printed below use the SAME overlap as the training windows -- these differ from the final evaluation numbers below, which use overlap=1 unless an overlap=0.5 pass is requested.
+min_track_size = 0
+seq_overlap_rate = 0.5
+[config] feature spans: [('bbox', 0, 4)]
+[config] decoder input width = 4 from ['bbox']
+[config] feature spans: [('bbox', 0, 4)]
+[config] decoder input width = 4 from ['bbox']
+feature_shape from context_model: (7, 7, 512)
+[features] reusing stacked cache D:\PIE codes\PIE_dataset/data/data\pie\train\features_context_pad_resize\vgg16_none_prep1_stacked_5164_15_3c4b7279f805_7x7x512.dat
+[features] reusing stacked cache D:\PIE codes\PIE_dataset/data/data\pie\val\features_context_pad_resize\vgg16_none_prep1_stacked_1376_15_8634bdfa2d2c_7x7x512.dat
+[visual_percentile] fitting positive-percentile scales (q=99, train only)
+[visual_percentile] q=99.0 fitted on 5164 windows x 512 channels | scales in [28.7039, 161.9054] | channels with no positives: 0
+[seed] global seed = 1 (weights/dropout/shuffle)
+[config] fusion=pie feature_target=decoder decoder_width=4 extra_width=0
+[visual_pipeline] graph order: VGG -> (raw) -> ConvLSTM
+[visual_pipeline] applied PositivePercentileScale
+Model: "model"
+__________________________________________________________________________________________________
+ Layer (type)                   Output Shape         Param #     Connected to                     
+==================================================================================================
+ encoder_input (InputLayer)     [(None, 15, 7, 7, 5  0           []                               
+                                12)]                                                              
+                                                                                                  
+ visual_percentile (PositivePer  (None, 15, 7, 7, 51  0          ['encoder_input[0][0]']          
+ centileScale)                  2)                                                                
+                                                                                                  
+ conv_lstm2d (ConvLSTM2D)       (None, 6, 6, 64)     590080      ['visual_percentile[0][0]']      
+                                                                                                  
+ encoder_flatten (Flatten)      (None, 2304)         0           ['conv_lstm2d[0][0]']            
+                                                                                                  
+ repeat_vector (RepeatVector)   (None, 15, 2304)     0           ['encoder_flatten[0][0]']        
+                                                                                                  
+ decoder_input (InputLayer)     [(None, 15, 4)]      0           []                               
+                                                                                                  
+ concatenate (Concatenate)      (None, 15, 2308)     0           ['repeat_vector[0][0]',          
+                                                                  'decoder_input[0][0]']          
+                                                                                                  
+ decoder_network (LSTM)         (None, 128)          1247744     ['concatenate[0][0]']            
+                                                                                                  
+ decoder_dense (Dense)          (None, 1)            129         ['decoder_network[0][0]']        
+                                                                                                  
+==================================================================================================
+Total params: 1,837,953
+Trainable params: 1,837,953
+Non-trainable params: 0
+__________________________________________________________________________________________________
+[arch] BUILT via feature_routing: fusion=pie feature_target=decoder zero_visual=False
+Wrote configs to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\configs
+Wrote hyperparams to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\hyperparams.json
+TO STOP-> type nul > 'D:\PIE codes\PIE_dataset\STOP in cmd'\n[stop] to stop cleanly after the current epoch, create the file: D:\PIE codes\PIE_dataset\STOP
+[lr] initial learning rate = 1.000e-05
+epoch   1 loss: train=2.4749 val=2.5482   (train/test full metrics off)
+epoch   1 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.5603 ap=0.5377 nll=0.8580 ece=0.2859 pmean=0.733 pstd=0.050
+epoch   2 loss: train=2.3923 val=2.4702   (train/test full metrics off)
+epoch   2 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.5332 ap=0.4892 nll=0.8377 ece=0.2655 pmean=0.714 pstd=0.048
+epoch   3 loss: train=2.3320 val=2.3970   (train/test full metrics off)
+epoch   3 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.5230 ap=0.4849 nll=0.8208 ece=0.2554 pmean=0.697 pstd=0.046
+epoch   4 loss: train=2.2582 val=2.3248   (train/test full metrics off)
+epoch   4 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.5212 ap=0.5048 nll=0.8032 ece=0.2277 pmean=0.685 pstd=0.042
+epoch   5 loss: train=2.2043 val=2.2581   (train/test full metrics off)
+epoch   5 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.5282 ap=0.5141 nll=0.7896 ece=0.2165 pmean=0.674 pstd=0.044
+epoch   6 loss: train=2.1487 val=2.1928   (train/test full metrics off)
+epoch   6 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.5430 ap=0.5286 nll=0.7760 ece=0.2053 pmean=0.662 pstd=0.046
+epoch   7 loss: train=2.0947 val=2.1303   (train/test full metrics off)
+epoch   7 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.5508 ap=0.5244 nll=0.7634 ece=0.1944 pmean=0.652 pstd=0.047
+epoch   8 loss: train=2.0410 val=2.0663   (train/test full metrics off)
+epoch   8 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6160 ap=0.5698 nll=0.7478 ece=0.1837 pmean=0.641 pstd=0.046
+epoch   9 loss: train=1.9914 val=2.0136   (train/test full metrics off)
+epoch   9 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6221 ap=0.5808 nll=0.7419 ece=0.1759 pmean=0.633 pstd=0.046
+epoch  10 loss: train=1.9439 val=1.9647   (train/test full metrics off)
+epoch  10 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6174 ap=0.5824 nll=0.7383 ece=0.1721 pmean=0.627 pstd=0.046
+epoch  11 loss: train=1.8962 val=1.9164   (train/test full metrics off)
+epoch  11 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6211 ap=0.5854 nll=0.7339 ece=0.1667 pmean=0.622 pstd=0.046
+epoch  12 loss: train=1.8488 val=1.8738   (train/test full metrics off)
+epoch  12 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6080 ap=0.5703 nll=0.7337 ece=0.1609 pmean=0.618 pstd=0.045
+epoch  13 loss: train=1.8047 val=1.8310   (train/test full metrics off)
+epoch  13 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6067 ap=0.5592 nll=0.7317 ece=0.1577 pmean=0.615 pstd=0.043
+epoch  14 loss: train=1.7640 val=1.7898   (train/test full metrics off)
+epoch  14 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6067 ap=0.5603 nll=0.7300 ece=0.1599 pmean=0.612 pstd=0.045
+epoch  15 loss: train=1.7237 val=1.7498   (train/test full metrics off)
+epoch  15 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=0.9984 specificity=0.0013 balanced_acc=0.4999 f1=0.6271 auc=0.6071 ap=0.5601 nll=0.7277 ece=0.1512 pmean=0.608 pstd=0.047
+epoch  16 loss: train=1.6897 val=1.7132   (train/test full metrics off)
+epoch  16 [val  ] accuracy=0.4586 majority_acc=0.5429 precision=0.4577 recall=0.9968 specificity=0.0054 balanced_acc=0.5011 f1=0.6273 auc=0.6056 ap=0.5647 nll=0.7275 ece=0.1507 pmean=0.608 pstd=0.046
+epoch  17 loss: train=1.6518 val=1.6783   (train/test full metrics off)
+epoch  17 [val  ] accuracy=0.4615 majority_acc=0.5429 precision=0.4589 recall=0.9952 specificity=0.0120 balanced_acc=0.5036 f1=0.6282 auc=0.6105 ap=0.5726 nll=0.7277 ece=0.1517 pmean=0.609 pstd=0.048
+epoch  18 loss: train=1.6165 val=1.6439   (train/test full metrics off)
+epoch  18 [val  ] accuracy=0.4586 majority_acc=0.5429 precision=0.4577 recall=0.9984 specificity=0.0040 balanced_acc=0.5012 f1=0.6277 auc=0.6044 ap=0.5679 nll=0.7271 ece=0.1507 pmean=0.608 pstd=0.048
+epoch  19 loss: train=1.5793 val=1.6104   (train/test full metrics off)
+epoch  19 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4571 recall=1.0000 specificity=0.0000 balanced_acc=0.5000 f1=0.6274 auc=0.6095 ap=0.5704 nll=0.7260 ece=0.1501 pmean=0.607 pstd=0.048
+epoch  20 loss: train=1.5460 val=1.5788   (train/test full metrics off)
+epoch  20 [val  ] accuracy=0.4593 majority_acc=0.5429 precision=0.4581 recall=0.9984 specificity=0.0054 balanced_acc=0.5019 f1=0.6280 auc=0.6025 ap=0.5583 nll=0.7251 ece=0.1461 pmean=0.603 pstd=0.049
+epoch  21 loss: train=1.5131 val=1.5456   (train/test full metrics off)
+epoch  21 [val  ] accuracy=0.4622 majority_acc=0.5429 precision=0.4589 recall=0.9841 specificity=0.0228 balanced_acc=0.5034 f1=0.6259 auc=0.6085 ap=0.5667 nll=0.7214 ece=0.1427 pmean=0.600 pstd=0.052
+epoch  22 loss: train=1.4850 val=1.5173   (train/test full metrics off)
+epoch  22 [val  ] accuracy=0.4608 majority_acc=0.5429 precision=0.4582 recall=0.9857 specificity=0.0187 balanced_acc=0.5022 f1=0.6256 auc=0.6068 ap=0.5642 nll=0.7213 ece=0.1428 pmean=0.600 pstd=0.050
+epoch  23 loss: train=1.4570 val=1.4901   (train/test full metrics off)
+epoch  23 [val  ] accuracy=0.4629 majority_acc=0.5429 precision=0.4597 recall=0.9968 specificity=0.0134 balanced_acc=0.5051 f1=0.6292 auc=0.6072 ap=0.5627 nll=0.7208 ece=0.1423 pmean=0.599 pstd=0.050
+epoch  24 loss: train=1.4255 val=1.4638   (train/test full metrics off)
+epoch  24 [val  ] accuracy=0.4608 majority_acc=0.5429 precision=0.4585 recall=0.9936 specificity=0.0120 balanced_acc=0.5028 f1=0.6275 auc=0.6119 ap=0.5595 nll=0.7197 ece=0.1420 pmean=0.599 pstd=0.051
+epoch  25 loss: train=1.3994 val=1.4391   (train/test full metrics off)
+epoch  25 [val  ] accuracy=0.4557 majority_acc=0.5429 precision=0.4561 recall=0.9905 specificity=0.0054 balanced_acc=0.4979 f1=0.6246 auc=0.6208 ap=0.5556 nll=0.7188 ece=0.1424 pmean=0.600 pstd=0.051
+epoch  26 loss: train=1.3647 val=1.4152   (train/test full metrics off)
+epoch  26 [val  ] accuracy=0.4564 majority_acc=0.5429 precision=0.4562 recall=0.9857 specificity=0.0107 balanced_acc=0.4982 f1=0.6237 auc=0.6249 ap=0.5543 nll=0.7171 ece=0.1459 pmean=0.599 pstd=0.054
+epoch  27 loss: train=1.3445 val=1.3937   (train/test full metrics off)
+epoch  27 [val  ] accuracy=0.4557 majority_acc=0.5429 precision=0.4558 recall=0.9841 specificity=0.0107 balanced_acc=0.4974 f1=0.6230 auc=0.6376 ap=0.5630 nll=0.7165 ece=0.1462 pmean=0.599 pstd=0.052
+epoch  28 loss: train=1.3170 val=1.3732   (train/test full metrics off)
+epoch  28 [val  ] accuracy=0.4542 majority_acc=0.5429 precision=0.4552 recall=0.9857 specificity=0.0067 balanced_acc=0.4962 f1=0.6228 auc=0.6556 ap=0.5818 nll=0.7152 ece=0.1541 pmean=0.603 pstd=0.052
+epoch  29 loss: train=1.2932 val=1.3531   (train/test full metrics off)
+epoch  29 [val  ] accuracy=0.4542 majority_acc=0.5429 precision=0.4549 recall=0.9793 specificity=0.0120 balanced_acc=0.4957 f1=0.6213 auc=0.6663 ap=0.5924 nll=0.7129 ece=0.1703 pmean=0.603 pstd=0.055
+epoch  30 loss: train=1.2659 val=1.3359   (train/test full metrics off)
+epoch  30 [val  ] accuracy=0.4542 majority_acc=0.5429 precision=0.4549 recall=0.9777 specificity=0.0134 balanced_acc=0.4956 f1=0.6209 auc=0.6818 ap=0.6046 nll=0.7123 ece=0.1645 pmean=0.606 pstd=0.057
+epoch  31 loss: train=1.2438 val=1.3210   (train/test full metrics off)
+epoch  31 [val  ] accuracy=0.4499 majority_acc=0.5429 precision=0.4522 recall=0.9618 specificity=0.0187 balanced_acc=0.4903 f1=0.6151 auc=0.6825 ap=0.6088 nll=0.7126 ece=0.1732 pmean=0.609 pstd=0.060
+epoch  32 loss: train=1.2181 val=1.3067   (train/test full metrics off)
+epoch  32 [val  ] accuracy=0.4520 majority_acc=0.5429 precision=0.4528 recall=0.9539 specificity=0.0295 balanced_acc=0.4917 f1=0.6141 auc=0.6837 ap=0.6062 nll=0.7124 ece=0.1735 pmean=0.608 pstd=0.062
+epoch  33 loss: train=1.2010 val=1.2937   (train/test full metrics off)
+epoch  33 [val  ] accuracy=0.4571 majority_acc=0.5429 precision=0.4551 recall=0.9507 specificity=0.0415 balanced_acc=0.4961 f1=0.6155 auc=0.6785 ap=0.6025 nll=0.7126 ece=0.1755 pmean=0.609 pstd=0.065
+epoch  34 loss: train=1.1735 val=1.2841   (train/test full metrics off)
+epoch  34 [val  ] accuracy=0.4600 majority_acc=0.5429 precision=0.4564 recall=0.9475 specificity=0.0495 balanced_acc=0.4985 f1=0.6160 auc=0.6719 ap=0.5983 nll=0.7154 ece=0.1754 pmean=0.613 pstd=0.067
+epoch  35 loss: train=1.1589 val=1.2741   (train/test full metrics off)
+epoch  35 [val  ] accuracy=0.4666 majority_acc=0.5429 precision=0.4594 recall=0.9444 specificity=0.0643 balanced_acc=0.5043 f1=0.6181 auc=0.6657 ap=0.5908 nll=0.7170 ece=0.1725 pmean=0.616 pstd=0.071
+epoch  36 loss: train=1.1439 val=1.2634   (train/test full metrics off)
+epoch  36 [val  ] accuracy=0.4709 majority_acc=0.5429 precision=0.4610 recall=0.9300 specificity=0.0843 balanced_acc=0.5072 f1=0.6164 auc=0.6548 ap=0.5800 nll=0.7172 ece=0.1758 pmean=0.615 pstd=0.075
+epoch  37 loss: train=1.1243 val=1.2571   (train/test full metrics off)
+epoch  37 [val  ] accuracy=0.4688 majority_acc=0.5429 precision=0.4600 recall=0.9316 specificity=0.0790 balanced_acc=0.5053 f1=0.6159 auc=0.6457 ap=0.5755 nll=0.7212 ece=0.1720 pmean=0.620 pstd=0.077
+epoch  38 loss: train=1.1058 val=1.2482   (train/test full metrics off)
+epoch  38 [val  ] accuracy=0.4673 majority_acc=0.5429 precision=0.4591 recall=0.9269 specificity=0.0803 balanced_acc=0.5036 f1=0.6140 auc=0.6507 ap=0.5838 nll=0.7220 ece=0.1757 pmean=0.622 pstd=0.080
+epoch  39 loss: train=1.0877 val=1.2366   (train/test full metrics off)
+epoch  39 [val  ] accuracy=0.4760 majority_acc=0.5429 precision=0.4633 recall=0.9221 specificity=0.1004 balanced_acc=0.5113 f1=0.6167 auc=0.6520 ap=0.5839 nll=0.7193 ece=0.1754 pmean=0.620 pstd=0.084
+epoch  40 loss: train=1.0751 val=1.2341   (train/test full metrics off)
+epoch  40 [val  ] accuracy=0.4746 majority_acc=0.5429 precision=0.4628 recall=0.9285 specificity=0.0924 balanced_acc=0.5104 f1=0.6177 auc=0.6493 ap=0.5828 nll=0.7253 ece=0.1871 pmean=0.629 pstd=0.087
+epoch  41 loss: train=1.0514 val=1.2294   (train/test full metrics off)
+epoch  41 [val  ] accuracy=0.4717 majority_acc=0.5429 precision=0.4614 recall=0.9300 specificity=0.0857 balanced_acc=0.5079 f1=0.6168 auc=0.6424 ap=0.5794 nll=0.7288 ece=0.1910 pmean=0.632 pstd=0.089
+epoch  42 loss: train=1.0403 val=1.2199   (train/test full metrics off)
+epoch  42 [val  ] accuracy=0.4709 majority_acc=0.5429 precision=0.4608 recall=0.9253 specificity=0.0884 balanced_acc=0.5068 f1=0.6152 auc=0.6380 ap=0.5750 nll=0.7268 ece=0.1870 pmean=0.628 pstd=0.090
+epoch  43 loss: train=1.0190 val=1.2115   (train/test full metrics off)
+epoch  43 [val  ] accuracy=0.4818 majority_acc=0.5429 precision=0.4663 recall=0.9253 specificity=0.1084 balanced_acc=0.5169 f1=0.6201 auc=0.6397 ap=0.5763 nll=0.7256 ece=0.1838 pmean=0.627 pstd=0.095
+epoch  44 loss: train=1.0137 val=1.2063   (train/test full metrics off)
+epoch  44 [val  ] accuracy=0.4811 majority_acc=0.5429 precision=0.4660 recall=0.9269 specificity=0.1058 balanced_acc=0.5163 f1=0.6202 auc=0.6373 ap=0.5809 nll=0.7272 ece=0.1816 pmean=0.629 pstd=0.096
+epoch  45 loss: train=0.9978 val=1.1926   (train/test full metrics off)
+epoch  45 [val  ] accuracy=0.4920 majority_acc=0.5429 precision=0.4713 recall=0.9141 specificity=0.1365 balanced_acc=0.5253 f1=0.6220 auc=0.6452 ap=0.5848 nll=0.7199 ece=0.1718 pmean=0.623 pstd=0.101
+epoch  46 loss: train=0.9882 val=1.1946   (train/test full metrics off)
+epoch  46 [val  ] accuracy=0.4935 majority_acc=0.5429 precision=0.4724 recall=0.9253 specificity=0.1299 balanced_acc=0.5276 f1=0.6255 auc=0.6410 ap=0.5875 nll=0.7280 ece=0.1798 pmean=0.632 pstd=0.102
+epoch  47 loss: train=0.9736 val=1.1886   (train/test full metrics off)
+epoch  47 [val  ] accuracy=0.4927 majority_acc=0.5429 precision=0.4720 recall=0.9253 specificity=0.1285 balanced_acc=0.5269 f1=0.6251 auc=0.6372 ap=0.5814 nll=0.7278 ece=0.1778 pmean=0.629 pstd=0.104
+epoch  48 loss: train=0.9571 val=1.1913   (train/test full metrics off)
+epoch  48 [val  ] accuracy=0.4862 majority_acc=0.5429 precision=0.4686 recall=0.9269 specificity=0.1151 balanced_acc=0.5210 f1=0.6225 auc=0.6293 ap=0.5768 nll=0.7359 ece=0.1856 pmean=0.635 pstd=0.106
+epoch  49 loss: train=0.9503 val=1.1907   (train/test full metrics off)
+epoch  49 [val  ] accuracy=0.4876 majority_acc=0.5429 precision=0.4694 recall=0.9253 specificity=0.1191 balanced_acc=0.5222 f1=0.6228 auc=0.6225 ap=0.5731 nll=0.7405 ece=0.1891 pmean=0.637 pstd=0.109
+epoch  50 loss: train=0.9357 val=1.1854   (train/test full metrics off)
+epoch  50 [val  ] accuracy=0.4913 majority_acc=0.5429 precision=0.4711 recall=0.9189 specificity=0.1312 balanced_acc=0.5251 f1=0.6228 auc=0.6231 ap=0.5702 nll=0.7401 ece=0.1894 pmean=0.635 pstd=0.113
+epoch  51 loss: train=0.9261 val=1.1769   (train/test full metrics off)
+epoch  51 [val  ] accuracy=0.4971 majority_acc=0.5429 precision=0.4740 recall=0.9126 specificity=0.1473 balanced_acc=0.5299 f1=0.6239 auc=0.6232 ap=0.5663 nll=0.7363 ece=0.1872 pmean=0.629 pstd=0.117
+epoch  52 loss: train=0.9133 val=1.1846   (train/test full metrics off)
+epoch  52 [val  ] accuracy=0.4913 majority_acc=0.5429 precision=0.4711 recall=0.9189 specificity=0.1312 balanced_acc=0.5251 f1=0.6228 auc=0.6148 ap=0.5637 nll=0.7485 ece=0.1963 pmean=0.638 pstd=0.118
+epoch  53 loss: train=0.9032 val=1.1686   (train/test full metrics off)
+epoch  53 [val  ] accuracy=0.5051 majority_acc=0.5429 precision=0.4783 recall=0.9094 specificity=0.1647 balanced_acc=0.5370 f1=0.6268 auc=0.6247 ap=0.5643 nll=0.7367 ece=0.1889 pmean=0.626 pstd=0.121
+epoch  54 loss: train=0.8929 val=1.1690   (train/test full metrics off)
+epoch  54 [val  ] accuracy=0.5269 majority_acc=0.5429 precision=0.4901 recall=0.8680 specificity=0.2396 balanced_acc=0.5538 f1=0.6265 auc=0.6238 ap=0.5657 nll=0.7413 ece=0.1913 pmean=0.630 pstd=0.127
+epoch  55 loss: train=0.8776 val=1.1751   (train/test full metrics off)
+epoch  55 [val  ] accuracy=0.5349 majority_acc=0.5429 precision=0.4949 recall=0.8490 specificity=0.2704 balanced_acc=0.5597 f1=0.6253 auc=0.6152 ap=0.5628 nll=0.7514 ece=0.1978 pmean=0.637 pstd=0.131
+epoch  56 loss: train=0.8709 val=1.1678   (train/test full metrics off)
+epoch  56 [val  ] accuracy=0.5531 majority_acc=0.5429 precision=0.5069 recall=0.8203 specificity=0.3280 balanced_acc=0.5742 f1=0.6266 auc=0.6138 ap=0.5547 nll=0.7479 ece=0.1939 pmean=0.630 pstd=0.137
+epoch  57 loss: train=0.8623 val=1.1719   (train/test full metrics off)
+epoch  57 [val  ] accuracy=0.5552 majority_acc=0.5429 precision=0.5085 recall=0.8092 specificity=0.3414 balanced_acc=0.5753 f1=0.6245 auc=0.6098 ap=0.5497 nll=0.7558 ece=0.1996 pmean=0.634 pstd=0.143
+epoch  58 loss: train=0.8473 val=1.1776   (train/test full metrics off)
+epoch  58 [val  ] accuracy=0.5560 majority_acc=0.5429 precision=0.5091 recall=0.7981 specificity=0.3521 balanced_acc=0.5751 f1=0.6217 auc=0.6042 ap=0.5472 nll=0.7651 ece=0.2045 pmean=0.636 pstd=0.151
+[lr] epoch  58: ReduceLROnPlateau 1.000e-05 -> 5.000e-06 (takes effect from epoch 59)
+epoch  59 loss: train=0.8428 val=1.1790   (train/test full metrics off)
+epoch  59 [val  ] accuracy=0.5596 majority_acc=0.5429 precision=0.5118 recall=0.7917 specificity=0.3641 balanced_acc=0.5779 f1=0.6217 auc=0.6035 ap=0.5473 nll=0.7682 ece=0.2009 pmean=0.636 pstd=0.158
+epoch  60 loss: train=0.8420 val=1.1758   (train/test full metrics off)
+epoch  60 [val  ] accuracy=0.5581 majority_acc=0.5429 precision=0.5110 recall=0.7742 specificity=0.3762 balanced_acc=0.5752 f1=0.6157 auc=0.6046 ap=0.5481 nll=0.7667 ece=0.2010 pmean=0.632 pstd=0.165
+epoch  61 loss: train=0.8341 val=1.1678   (train/test full metrics off)
+epoch  61 [val  ] accuracy=0.5581 majority_acc=0.5429 precision=0.5113 recall=0.7536 specificity=0.3936 balanced_acc=0.5736 f1=0.6093 auc=0.6058 ap=0.5488 nll=0.7604 ece=0.1957 pmean=0.622 pstd=0.174
+epoch  62 loss: train=0.8159 val=1.1694   (train/test full metrics off)
+epoch  62 [val  ] accuracy=0.5567 majority_acc=0.5429 precision=0.5105 recall=0.7361 specificity=0.4056 balanced_acc=0.5709 f1=0.6029 auc=0.6044 ap=0.5498 nll=0.7636 ece=0.1982 pmean=0.620 pstd=0.181
+epoch  63 loss: train=0.8160 val=1.1746   (train/test full metrics off)
+epoch  63 [val  ] accuracy=0.5589 majority_acc=0.5429 precision=0.5123 recall=0.7266 specificity=0.4177 balanced_acc=0.5721 f1=0.6009 auc=0.6019 ap=0.5489 nll=0.7705 ece=0.1985 pmean=0.622 pstd=0.186
+[lr] epoch  63: ReduceLROnPlateau 5.000e-06 -> 2.500e-06 (takes effect from epoch 64)
+epoch  64 loss: train=0.8128 val=1.1780   (train/test full metrics off)
+epoch  64 [val  ] accuracy=0.5589 majority_acc=0.5429 precision=0.5123 recall=0.7297 specificity=0.4150 balanced_acc=0.5724 f1=0.6020 auc=0.5999 ap=0.5487 nll=0.7748 ece=0.2016 pmean=0.624 pstd=0.188
+epoch  65 loss: train=0.8061 val=1.1773   (train/test full metrics off)
+epoch  65 [val  ] accuracy=0.5596 majority_acc=0.5429 precision=0.5131 recall=0.7138 specificity=0.4297 balanced_acc=0.5718 f1=0.5971 auc=0.5992 ap=0.5470 nll=0.7749 ece=0.2019 pmean=0.621 pstd=0.190
+epoch  66 loss: train=0.8074 val=1.1869   (train/test full metrics off)
+epoch  66 [val  ] accuracy=0.5596 majority_acc=0.5429 precision=0.5128 recall=0.7313 specificity=0.4150 balanced_acc=0.5732 f1=0.6029 auc=0.5964 ap=0.5466 nll=0.7853 ece=0.2070 pmean=0.630 pstd=0.191
+Wrote history to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\history.pkl
+encoder seq length: 15
+L2 reg term now: 0.40162745118141174
+decoder seq length: 15
+model input shapes: [TensorShape([None, 15, 7, 7, 512]), TensorShape([None, 15, 4])]
+Model + configs saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit
+[note] per-epoch metrics below use seq_overlap_rate=0.5 (training overlap) -- NOT comparable to the overlap=1 final evaluation numbers below.
+
+========================================================================================================
+FULL PER-EPOCH METRICS (from history.pkl -- Keras' own History callback)
+========================================================================================================
+ epoch          loss      val_loss      accuracy  val_accuracy       val_nll       val_auc            lr
+     1        2.4749        2.5482        0.4855        0.4571        0.8580        0.5603         1e-05
+     2        2.3923        2.4702        0.5083        0.4571        0.8377        0.5332         1e-05
+     3        2.3320        2.3970        0.5010        0.4571        0.8208        0.5230         1e-05
+     4        2.2582        2.3248        0.5190        0.4571        0.8032        0.5212         1e-05
+     5        2.2043        2.2581        0.5209        0.4571        0.7896        0.5282         1e-05
+     6        2.1487        2.1928        0.5306        0.4571        0.7760        0.5430         1e-05
+     7        2.0947        2.1303        0.5320        0.4571        0.7634        0.5508         1e-05
+     8        2.0410        2.0663        0.5422        0.4571        0.7478        0.6160         1e-05
+     9        1.9914        2.0136        0.5473        0.4571        0.7419        0.6221         1e-05
+    10        1.9439        1.9647        0.5341        0.4571        0.7383        0.6174         1e-05
+    11        1.8962        1.9164        0.5492        0.4571        0.7339        0.6211         1e-05
+    12        1.8488        1.8738        0.5575        0.4571        0.7337        0.6080         1e-05
+    13        1.8047        1.8310        0.5562        0.4571        0.7317        0.6067         1e-05
+    14        1.7640        1.7898        0.5595        0.4571        0.7300        0.6067         1e-05
+    15        1.7237        1.7498        0.5645        0.4571        0.7277        0.6071         1e-05
+    16        1.6897        1.7132        0.5616        0.4586        0.7275        0.6056         1e-05
+    17        1.6518        1.6783        0.5662        0.4615        0.7277        0.6105         1e-05
+    18        1.6165        1.6439        0.5589        0.4586        0.7271        0.6044         1e-05
+    19        1.5793        1.6104        0.5753        0.4571        0.7260        0.6095         1e-05
+    20        1.5460        1.5788        0.5747        0.4593        0.7251        0.6025         1e-05
+    21        1.5131        1.5456        0.5809        0.4622        0.7214        0.6085         1e-05
+    22        1.4850        1.5173        0.5838        0.4608        0.7213        0.6068         1e-05
+    23        1.4570        1.4901        0.5792        0.4629        0.7208        0.6072         1e-05
+    24        1.4255        1.4638        0.5899        0.4608        0.7197        0.6119         1e-05
+    25        1.3994        1.4391        0.5920        0.4557        0.7188        0.6208         1e-05
+    26        1.3647        1.4152        0.6081        0.4564        0.7171        0.6249         1e-05
+    27        1.3445        1.3937        0.6053        0.4557        0.7165        0.6376         1e-05
+    28        1.3170        1.3732        0.6112        0.4542        0.7152        0.6556         1e-05
+    29        1.2932        1.3531        0.6199        0.4542        0.7129        0.6663         1e-05
+    30        1.2659        1.3359        0.6437        0.4542        0.7123        0.6818         1e-05
+    31        1.2438        1.3210        0.6505        0.4499        0.7126        0.6825         1e-05
+    32        1.2181        1.3067        0.6543        0.4520        0.7124        0.6837         1e-05
+    33        1.2010        1.2937        0.6692        0.4571        0.7126        0.6785         1e-05
+    34        1.1735        1.2841        0.6861        0.4600        0.7154        0.6719         1e-05
+    35        1.1589        1.2741        0.6987        0.4666        0.7170        0.6657         1e-05
+    36        1.1439        1.2634        0.6942        0.4709        0.7172        0.6548         1e-05
+    37        1.1243        1.2571        0.7146        0.4688        0.7212        0.6457         1e-05
+    38        1.1058        1.2482        0.7200        0.4673        0.7220        0.6507         1e-05
+    39        1.0877        1.2366        0.7293        0.4760        0.7193        0.6520         1e-05
+    40        1.0751        1.2341        0.7359        0.4746        0.7253        0.6493         1e-05
+    41        1.0514        1.2294        0.7537        0.4717        0.7288        0.6424         1e-05
+    42        1.0403        1.2199        0.7585        0.4709        0.7268        0.6380         1e-05
+    43        1.0190        1.2115        0.7703        0.4818        0.7256        0.6397         1e-05
+    44        1.0137        1.2063        0.7734        0.4811        0.7272        0.6373         1e-05
+    45        0.9978        1.1926        0.7810        0.4920        0.7199        0.6452         1e-05
+    46        0.9882        1.1946        0.7814        0.4935        0.7280        0.6410         1e-05
+    47        0.9736        1.1886        0.7936        0.4927        0.7278        0.6372         1e-05
+    48        0.9571        1.1913        0.8029        0.4862        0.7359        0.6293         1e-05
+    49        0.9503        1.1907        0.8015        0.4876        0.7405        0.6225         1e-05
+    50        0.9357        1.1854        0.8075        0.4913        0.7401        0.6231         1e-05
+    51        0.9261        1.1769        0.8093        0.4971        0.7363        0.6232         1e-05
+    52        0.9133        1.1846        0.8201        0.4913        0.7485        0.6148         1e-05
+    53        0.9032        1.1686        0.8240        0.5051        0.7367        0.6247         1e-05
+    54        0.8929        1.1690        0.8257        0.5269        0.7413        0.6238         1e-05
+    55        0.8776        1.1751        0.8278        0.5349        0.7514        0.6152         1e-05
+    56        0.8709        1.1678        0.8346        0.5531        0.7479        0.6138         1e-05
+    57        0.8623        1.1719        0.8400        0.5552        0.7558        0.6098         1e-05
+    58        0.8473        1.1776        0.8389        0.5560        0.7651        0.6042         1e-05
+    59        0.8428        1.1790        0.8460        0.5596        0.7682        0.6035         5e-06
+    60        0.8420        1.1758        0.8451        0.5581        0.7667        0.6046         5e-06
+    61        0.8341        1.1678        0.8464        0.5581        0.7604        0.6058         5e-06
+    62        0.8159        1.1694        0.8536        0.5567        0.7636        0.6044         5e-06
+    63        0.8160        1.1746        0.8513        0.5589        0.7705        0.6019         5e-06
+    64        0.8128        1.1780        0.8528        0.5589        0.7748        0.5999       2.5e-06
+    65        0.8061        1.1773        0.8548        0.5596        0.7749        0.5992       2.5e-06
+    66        0.8074        1.1869        0.8513        0.5596        0.7853        0.5964       2.5e-06
+========================================================================================================
+
+>>> Full per-split evaluation (train, val, test)
+    Re-runs the BEST checkpoint over each split at overlap=1, saving predictions + full metrics to disk. This is the authoritative number for the run, not the per-epoch numbers printed during training.
+
+>>> Final evaluation on the 'train' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,837,953 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\ped_intents_train.pkl
+[note] 'train' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[train] metrics at threshold=0.5 -- accuracy: 0.8039  F1: 0.8217
+[train] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_train.json
+  accuracy: 0.8038681787558949
+  majority_acc: 0.5108634628340445
+  precision: 0.7397776348433336
+  recall: 0.9240746054519369
+  specificity: 0.6887741084674982
+  balanced_acc: 0.8064243569597176
+  f1: 0.8217192722819014
+  roc_auc: 0.9033213927042675
+  pr_auc: 0.8981747235236908
+  nll: 0.5326869064254942
+  ece: 0.20807818187471389
+  brier_score: 0.1765116932827961
+  confusion_matrix: [[12535, 5664], [1323, 16102]]
+  n_test_samples: 35624
+  positive_rate_gt: 0.4891365371659555
+  threshold_used: 0.5
+
+>>> Final evaluation on the 'val' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,837,953 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\ped_intents_val.pkl
+[note] 'val' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[val] metrics at threshold=0.5 -- accuracy: 0.5515  F1: 0.6236
+[val] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_val.json
+  accuracy: 0.5515349720434645
+  majority_acc: 0.543622745015297
+  precision: 0.5053825175828908
+  recall: 0.813915857605178
+  specificity: 0.3312633417426742
+  balanced_acc: 0.5725895996739261
+  f1: 0.623572124324803
+  roc_auc: 0.6084422317401881
+  pr_auc: 0.5552960334305175
+  nll: 0.7511620037684376
+  ece: 0.196455599735628
+  brier_score: 0.27353684025556846
+  confusion_matrix: [[1707, 3446], [805, 3521]]
+  n_test_samples: 9479
+  positive_rate_gt: 0.45637725498470305
+  threshold_used: 0.5
+
+>>> Final evaluation on the 'test' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,837,953 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\ped_intents_test.pkl
+[note] 'test' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[test] metrics at threshold=0.5 -- accuracy: 0.7854  F1: 0.8721
+[test] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_test.json
+  accuracy: 0.785407294344473
+  majority_acc: 0.8211760925449871
+  precision: 0.853988420337076
+  recall: 0.891019369986304
+  specificity: 0.30042677448337823
+  balanced_acc: 0.5957230722348411
+  f1: 0.8721109767920622
+  roc_auc: 0.7105008918803989
+  pr_auc: 0.9035687810853653
+  nll: 0.4916532752184578
+  ece: 0.14751882786122758
+  brier_score: 0.15731069135101386
+  confusion_matrix: [[2675, 6229], [4456, 36432]]
+  n_test_samples: 49792
+  positive_rate_gt: 0.8211760925449871
+  threshold_used: 0.5
+
+>>> Threshold calibration
+    Sweeps decision thresholds 0.05-0.95 and picks the one that maximizes F1 -- using VAL labels ONLY, never test -- since picking a threshold on test would leak test information into the reported numbers.
+[calibration] best threshold on val = 0.05 (val f1 = 0.6267)
+
+>>> Recomputing all splits at the calibrated threshold
+    Applies the val-selected threshold to predictions already saved above -- no re-inference, just re-thresholding the same probabilities, so this step is fast.
+[train] CALIBRATED metrics (threshold=0.05) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_train_calibrated.json
+  accuracy: 0.4891365371659555
+  majority_acc: 0.5108634628340445
+  precision: 0.4891365371659555
+  recall: 1.0
+  specificity: 0.0
+  balanced_acc: 0.5
+  f1: 0.6569398103640031
+  roc_auc: 0.9033213927042675
+  pr_auc: 0.8981747235236908
+  nll: 0.5326869064254942
+  ece: 0.20807818187471389
+  brier_score: 0.1765116932827961
+  confusion_matrix: [[0, 18199], [0, 17425]]
+  n_test_samples: 35624
+  positive_rate_gt: 0.4891365371659555
+  threshold_used: 0.05
+[val] CALIBRATED metrics (threshold=0.05) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_val_calibrated.json
+  accuracy: 0.45637725498470305
+  majority_acc: 0.543622745015297
+  precision: 0.45637725498470305
+  recall: 1.0
+  specificity: 0.0
+  balanced_acc: 0.5
+  f1: 0.6267294458529519
+  roc_auc: 0.6084422317401881
+  pr_auc: 0.5552960334305175
+  nll: 0.7511620037684376
+  ece: 0.196455599735628
+  brier_score: 0.27353684025556846
+  confusion_matrix: [[0, 5153], [0, 4326]]
+  n_test_samples: 9479
+  positive_rate_gt: 0.45637725498470305
+  threshold_used: 0.05
+[test] CALIBRATED metrics (threshold=0.05) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_test_calibrated.json
+  accuracy: 0.8211760925449871
+  majority_acc: 0.8211760925449871
+  precision: 0.8211760925449871
+  recall: 1.0
+  specificity: 0.0
+  balanced_acc: 0.5
+  f1: 0.901808557565064
+  roc_auc: 0.7105008918803989
+  pr_auc: 0.9035687810853653
+  nll: 0.4916532752184578
+  ece: 0.14751882786122758
+  brier_score: 0.15731069135101386
+  confusion_matrix: [[0, 8904], [0, 40888]]
+  n_test_samples: 49792
+  positive_rate_gt: 0.8211760925449871
+  threshold_used: 0.05
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\loss_curve.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\epoch_curves.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\metrics_comparison_thresh05.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\metrics_comparison_calibrated.png
+
+======================================================================
+SUMMARY -- ALL SPLITS (threshold=0.5)
+[note] overlap=1 for all splits above -- not comparable to per-epoch val/test numbers printed during training (seq_overlap_rate=0.5).
+======================================================================
+            metric       train         val        test
+          accuracy      0.8039      0.5515      0.7854
+      majority_acc      0.5109      0.5436      0.8212
+         precision      0.7398      0.5054      0.8540
+            recall      0.9241      0.8139      0.8910
+       specificity      0.6888      0.3313      0.3004
+      balanced_acc      0.8064      0.5726      0.5957
+                f1      0.8217      0.6236      0.8721
+           roc_auc      0.9033      0.6084      0.7105
+            pr_auc      0.8982      0.5553      0.9036
+               nll      0.5327      0.7512      0.4917
+               ece      0.2081      0.1965      0.1475
+       brier_score      0.1765      0.2735      0.1573
+  positive_rate_gt      0.4891      0.4564      0.8212
+    threshold_used      0.5000      0.5000      0.5000
+
+======================================================================
+SUMMARY -- ALL SPLITS (calibrated threshold=0.05)
+[note] same overlap=1 predictions, re-thresholded with the val-selected threshold 0.05.
+======================================================================
+            metric       train         val        test
+          accuracy      0.4891      0.4564      0.8212
+      majority_acc      0.5109      0.5436      0.8212
+         precision      0.4891      0.4564      0.8212
+            recall      1.0000      1.0000      1.0000
+       specificity      0.0000      0.0000      0.0000
+      balanced_acc      0.5000      0.5000      0.5000
+                f1      0.6569      0.6267      0.9018
+           roc_auc      0.9033      0.6084      0.7105
+            pr_auc      0.8982      0.5553      0.9036
+               nll      0.5327      0.7512      0.4917
+               ece      0.2081      0.1965      0.1475
+       brier_score      0.1765      0.2735      0.1573
+  positive_rate_gt      0.4891      0.4564      0.8212
+    threshold_used      0.0500      0.0500      0.0500
+[threshold] train positive rate: tracks=0.5000 windows(overlap=1)=0.4891
+[threshold] decision_threshold=0.5: raw@0.5 and prior-corrected@0.5 are already reported above.

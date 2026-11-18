@@ -105,6 +105,25 @@ def interactive_pick_aux_loss(default=0.0):
     print('Invalid value, aux loss off')
     return 0.0
 
+def interactive_pick_fusion_mode(has_offline_features, default='pie_concat'):
+    """Choose how visual context is fused with decoder features.
+    Only meaningful when offline features are present.
+    """
+    if not has_offline_features:
+        return 'pie_concat'
+    print('\n--- Fusion mode (when offline features are present) ---')
+    print('  1. pie_concat *     RepeatVector + Concatenate all decoder features + one LSTM')
+    print('  2. core_plus_extras Visual+bbox core LSTM + separate LSTM per extra feature + BranchAttnPool')
+    raw = input(f'Select [1-2] (default {default}): ').strip()
+    if not raw:
+        return default
+    if raw == '1':
+        return 'pie_concat'
+    if raw == '2':
+        return 'core_plus_extras'
+    print('Invalid choice, using pie_concat')
+    return 'pie_concat'
+
 def get_architecture_config(name):
     """Return fusion / feature_target / flags for the chosen architecture."""
     if name not in ARCHITECTURES:

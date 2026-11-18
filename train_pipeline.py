@@ -301,7 +301,8 @@ def choose_run_identity(opts, data, hp, pie_path):
     split_tag = build_data_split_tag(opts['split_type'], data['data_opts'])
     print(f"[config] DATA_SPLIT_TAG = {split_tag}")
 
-    decoder_features, feature_stds = interactive_pick_decoder_features(data['train'], use_visual=use_visual)
+    decoder_features, feature_stds = interactive_pick_decoder_features(
+        data['train'], use_visual=use_visual)
     data['data_opts']['decoder_input_type'] = decoder_features
     if 'bbox_branch' in decoder_features:
         attach_bbox_branch(data['train'], data['val'], data['test'])
@@ -309,26 +310,21 @@ def choose_run_identity(opts, data, hp, pie_path):
     # Global answer: default for every ordinary extra (the old question is kept).
     opts['extra_norm'] = interactive_pick_extra_norm()
     opts['feature_norm'] = interactive_pick_feature_norms(
-                                                        decoder_features, opts['extra_norm'],
-                                                         feature_stds=feature_stds)
+        decoder_features, opts['extra_norm'], feature_stds=feature_stds)
 
-    from architecture_registry import interactive_pick_architecture, get_architecture_config
+    from architecture_registry import (
+        interactive_pick_architecture, get_architecture_config,
+        interactive_pick_branch_mode, interactive_pick_aux_loss,
+        interactive_pick_fusion_mode,
+    )
     # The architecture menu is only meaningful when the VGG16 context is used.
     arch_name = interactive_pick_architecture() if use_visual else 'pie_convlstm'
     arch_cfg = get_architecture_config(arch_name)
 
     opts['branch_mode'] = None
     if arch_name in ('branchattn', 'branchattn_temporal'):
-        from architecture_registry import interactive_pick_branch_mode
         opts['branch_mode'] = interactive_pick_branch_mode()
         print(f"[config] BRANCH_MODE = {opts['branch_mode']}")
-    else:
-        opts['branch_mode'] = None
-    opts['aux_loss_weight'] = 0.0
-    if arch_name in ('branchattn', 'branchattn_temporal') and opts['branch_mode'] in ('static_pool', 'core_plus_extras'):
-        from architecture_registry import interactive_pick_aux_loss
-        opts['aux_loss_weight'] = interactive_pick_aux_loss()
-        print(f"[config] AUX_LOSS_WEIGHT = {opts['aux_loss_weight']}")
 
     opts['feature_target'] = arch_cfg['feature_target']
     opts['fusion'] = arch_cfg['fusion']
@@ -340,15 +336,38 @@ def choose_run_identity(opts, data, hp, pie_path):
     print(f"[config] ZERO_VISUAL   = {opts['zero_visual']}")
     print(f"[config] EXTRA_NORM    = {opts['extra_norm']}")
     print(f"[config] FEATURE_NORM  = {opts['feature_norm']}")
+
     if use_visual and 'bbox_branch' in decoder_features and opts['fusion'] == 'pie':
         print("[warning] bbox_branch + fusion=pie: the copy is only concatenated into the "
               "decoder input. For a PARALLEL bbox branch choose branchattn or branchattn_temporal.")
+
+    # Temporal encoder menu (only for temporal_encoders architecture)
     if arch_cfg.get('use_temporal_menu', False):
         from temporal_encoders import choose_temporal_for_menu
         choose_temporal_for_menu(opts)
     else:
         opts['temporal_encoder'] = None
         opts['temporal_hp'] = {}
+
+    # Interactive fusion mode when offline features are present
+    has_offline = any(f not in ('bbox',) for f in decoder_features)
+    if arch_name in ('temporal_encoders', 'branchattn', 'branchattn_temporal', 'pcpa') and has_offline:
+        opts['fusion_mode'] = interactive_pick_fusion_mode(has_offline)
+        print(f"[config] FUSION_MODE = {opts['fusion_mode']}")
+    else:
+        opts['fusion_mode'] = 'pie_concat'
+
+    # Auxiliary loss (only meaningful for multi-branch modes)
+    opts['aux_loss_weight'] = 0.0
+    multi_branch = (
+        (arch_name in ('branchattn', 'branchattn_temporal')
+         and opts.get('branch_mode') in ('static_pool', 'core_plus_extras'))
+        or opts.get('fusion_mode') == 'core_plus_extras'
+    )
+    if multi_branch:
+        opts['aux_loss_weight'] = interactive_pick_aux_loss()
+        print(f"[config] AUX_LOSS_WEIGHT = {opts['aux_loss_weight']}")
+
     print(f"[config] TEMPORAL_ENCODER = {opts.get('temporal_encoder')}")
     print(f"[config] TEMPORAL_HP      = {opts.get('temporal_hp')}")
     print(f"[config] USE_TTE  = {opts.get('use_tte')}")
