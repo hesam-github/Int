@@ -1134,9 +1134,22 @@ def interactive_pick_loss_choice(balance_mode=None):
             w_raw = input("  [bce_plus_focal] focal_weight [default: 1.0]: ").strip()
             gamma = float(g_raw) if g_raw else 2.0
             weight = float(w_raw) if w_raw else 1.0
-            fn = bce_plus_focal_loss(gamma=gamma, focal_weight=weight)
-            return fn.__name__, fn
-        print("  ! please enter 0, 1, or 2 or 3.", flush=True)
+
+            print("  [bce_plus_focal] positive-class weight (pos_weight):")
+            print("    [0] automatic  (same as weighted_bce: neg/pos on final train split)  <-- default")
+            print("    [1] custom     (enter a number; use 1.0 for already-balanced data)")
+            pw_choice = input("    choice [0/1] [default: 0]: ").strip()
+
+            if pw_choice in ("", "0"):
+                # resolve later, like weighted_bce
+                name = f"wbce_focal_g{gamma}_w{weight}_auto"
+                # return a special marker so the pipeline can inject pos_weight later
+                return name, ("wbce_focal_auto", gamma, weight)
+            else:
+                pw_raw = input("    custom pos_weight [default: 1.0]: ").strip()
+                pos_weight = float(pw_raw) if pw_raw else 1.0
+                fn = bce_plus_focal_loss(gamma=gamma, focal_weight=weight, pos_weight=pos_weight)
+                return fn.__name__, fn
 
 
 
