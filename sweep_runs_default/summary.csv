@@ -1,0 +1,7 @@
+run_id,run_tag,cfg_id,seed,split,status,minutes,coherent,offline,use_visual,bbox_mode,visual_norm,percentile,capacity,log1p,rs,cap_E_I_H,error,rc
+ox_y0ynnn_c1_s1,he0faefcd,ox_y0ynnn_c1,1,default,failed,1.99,True,none,y,0,y,n,1,n,n,8-0-128,"ure on CUDNN engine 5#TC: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 480247808 bytes.
+  Profiling failure on CUDNN engine 5: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 480247808 bytes.
+	 [[{{node model/conv_lstm2d/convolution}}]] [Op:__inference_train_function_10644]
+",
+o0_y0ynnn_c1_s1,,o0_y0ynnn_c1,1,,crashed,,,,,,,,,,,,,3221226505.0
+o1_y0ynnn_c1_s1,,o1_y0ynnn_c1,1,,interrupted,,,,,,,,,,,,,

@@ -87,6 +87,24 @@ def interactive_pick_branch_mode(default='static_pool'):
     print('Invalid choice, using static_pool')
     return 'static_pool'
     
+def interactive_pick_aux_loss(default=0.0):
+    """Total weight of the per-branch auxiliary losses. 0 = off (single loss, as before)."""
+    print('\n--- Auxiliary per-branch loss (branchattn: static_pool / core_plus_extras) ---')
+    print('  0   off (only the loss on the fused output)  <-- default')
+    print('  >0  every branch gets its own sigmoid head; the TOTAL aux weight is split equally')
+    print('      between the heads (main loss weight stays 1.0). Try 0.25 / 0.5 / 1.0.')
+    raw = input(f'aux_loss_weight (default {default}): ').strip()
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+        if value >= 0:
+            return value
+    except ValueError:
+        pass
+    print('Invalid value, aux loss off')
+    return 0.0
+
 def get_architecture_config(name):
     """Return fusion / feature_target / flags for the chosen architecture."""
     if name not in ARCHITECTURES:

@@ -324,6 +324,11 @@ def choose_run_identity(opts, data, hp, pie_path):
         print(f"[config] BRANCH_MODE = {opts['branch_mode']}")
     else:
         opts['branch_mode'] = None
+    opts['aux_loss_weight'] = 0.0
+    if arch_name in ('branchattn', 'branchattn_temporal') and opts['branch_mode'] in ('static_pool', 'core_plus_extras'):
+        from architecture_registry import interactive_pick_aux_loss
+        opts['aux_loss_weight'] = interactive_pick_aux_loss()
+        print(f"[config] AUX_LOSS_WEIGHT = {opts['aux_loss_weight']}")
 
     opts['feature_target'] = arch_cfg['feature_target']
     opts['fusion'] = arch_cfg['fusion']
@@ -449,7 +454,9 @@ def start_run(opts, hp, data, ident, pie_path):
         ('regularizer_val', hp['reg']),
         ('lstm_dropout', hp['lstm_dropout']),
         ('lstm_rec_dropout', hp['lstm_recurrent_dropout']),
-        ('lstm_rec_activation', opts['rec_act'])])
+        ('lstm_rec_activation', opts['rec_act']),
+        ('branch_mode', opts.get('branch_mode')),
+        ('aux_loss_weight', opts.get('aux_loss_weight', 0.0))])
     sec_opt = _print_section('optimizer/training hyperparams', [
         ('lr', hp['lr']),
         ('clip_type', opts['clip_type']),
@@ -520,6 +527,7 @@ def start_run(opts, hp, data, ident, pie_path):
     model.feature_target = opts.get('feature_target', 'decoder')
     model.fusion = opts.get('fusion', 'pie')
     model.branch_mode = opts.get('branch_mode')  # None for non-branch architectures
+    model.aux_loss_weight = float(opts.get('aux_loss_weight', 0.0) or 0.0)
     model.temporal_fusion = opts.get('temporal_fusion', 'pie_concat')
     model.extra_norm = opts.get('extra_norm', 'none')
     model.pose_scale = opts.get('pose_scale', 'bbox_relative')

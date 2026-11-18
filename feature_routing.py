@@ -445,12 +445,62 @@ def build_intention_model(intent):
     else:
         raise ValueError(f"unknown fusion: {fusion!r}")
 
+
+    # --- Auxiliary heads for multimodal learning (optional) ---
+    use_aux_loss = getattr(intent, 'use_aux_loss', False)
+    aux_outputs = []
+    if use_aux_loss and fusion in ('branchattn', 'branchattn_temporal'):
+        # هر شاخه قبل از pooling یک head جداگانه می‌گیرد
+        for i, branch in enumerate(branches):
+            aux = Dense(
+                intent._decoder_dense_output_size,
+                activation='sigmoid',
+                kernel_regularizer=intent._kernel_regularizer,
+                bias_regularizer=intent._bias_regularizer,
+                name=f'aux_head_{i}'
+            )(branch)
+            aux_outputs.append(aux)
+
     output = Dense(
         intent._decoder_dense_output_size, activation='sigmoid',
         kernel_regularizer=intent._kernel_regularizer,
         bias_regularizer=intent._bias_regularizer,
         name='decoder_dense')(hidden)
-    model = Model(inputs=[maps_in, dec_in], outputs=output, name='model')
+
+    if aux_outputs:
+        model = Model(
+            inputs=[maps_in, dec_in],
+            outputs=[output] + aux_outputs,
+            name='model'
+        )
+        intent.aux_output_count = len(aux_outputs)
+    else:
+        model = Model(inputs=[maps_in, dec_in], outputs=output, name='model')
+        intent.aux_output_count = 0
+
     if attn_weights is not None:
         intent.attention_model = Model(inputs=[maps_in, dec_in], outputs=attn_weights)
+    # Optional per-branch auxiliary heads. TRAIN-TIME ONLY: `model` (returned here, saved to
+    # model.h5, used by every predict/evaluate path) stays single-output. The multi-output
+    # model below shares the same layers and is used only by fit().
+    intent.aux_train_model = None
+    intent.aux_head_names = []
+    aux_weight = float(getattr(intent, 'aux_loss_weight', 0.0) or 0.0)
+    if aux_weight > 0:
+        if (fusion in ('branchattn', 'branchattn_temporal') and attn_weights is not None
+                and len(branches) > 1 and len(branches) == len(intent.branch_names)):
+            heads = []
+            for name, branch in zip(intent.branch_names, branches):
+                heads.append(Dense(
+                    intent._decoder_dense_output_size, activation='sigmoid',
+                    kernel_regularizer=intent._kernel_regularizer,
+                    bias_regularizer=intent._bias_regularizer,
+                    name=f'aux_{name}')(branch))
+            intent.aux_head_names = [f'aux_{n}' for n in intent.branch_names]
+            intent.aux_train_model = Model(
+                inputs=[maps_in, dec_in], outputs=[output] + heads, name='model_aux')
+            print(f"[config] aux heads (train only): {intent.aux_head_names}")
+        else:
+            print("[warning] aux_loss_weight > 0 ignored: it needs branchattn with branch_mode "
+                  "static_pool or core_plus_extras and at least two branches")
     return model

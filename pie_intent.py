@@ -63,6 +63,17 @@ from pie_intent_helpers import (
 
 from pie_data_Hesam import get_tracks
 
+class MainModelCheckpoint(ModelCheckpoint):
+    """ModelCheckpoint that always saves `export_model` (the single-output inference model),
+    even when fit() runs on a multi-output model that shares its layers (aux heads)."""
+
+    def __init__(self, export_model, **kwargs):
+        super().__init__(**kwargs)
+        self._export_model = export_model
+
+    def set_model(self, model):
+        super().set_model(self._export_model)
+
 PREP_TAG = "prep1"   # bump when crop/resize/preprocess logic changes
 FEATURE_CACHE_NAME = f"vgg16_none_{PREP_TAG}"
 
@@ -806,7 +817,27 @@ class PIEIntent(object):
             optimizer = RMSprop(**rmsprop_kwargs)
             vprint(f'[optimizer] RMSprop kwargs = {rmsprop_kwargs}')
 
-            train_model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+            aux_model = getattr(self, 'aux_train_model', None)
+            if aux_model is None:
+                fit_model = train_model
+                fit_model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+            else:
+                n_aux = len(aux_model.outputs) - 1
+                aux_each = float(self.aux_loss_weight) / n_aux
+                loss_fn = loss[0] if isinstance(loss, (list, tuple)) else loss
+                fit_model = aux_model
+                fit_model.compile(loss=[loss_fn] * (n_aux + 1),
+                                  loss_weights=[1.0] + [aux_each] * n_aux,
+                                  optimizer=optimizer,
+                                  metrics={'decoder_dense': metrics})
+                def _replicate_target(ds):
+                    return ds.map(lambda x, y: (x, tuple(y for _ in range(n_aux + 1))))
+                train_dataset = _replicate_target(train_dataset)
+                val_dataset = _replicate_target(val_dataset)
+                if test_dataset is not None:
+                    test_dataset = _replicate_target(test_dataset)
+                print(f"[aux] heads={aux_model.output_names[1:]} weight each={aux_each:.4f} "
+                      f"(main weight 1.0)")
             vprint('TRAINING: loss={} metrics={}'.format(loss, metrics))
 
             model_folder_name = time.strftime("%d%b%Y-%Hh%Mm%Ss")
@@ -859,6 +890,7 @@ class PIEIntent(object):
                 'visual_norm': getattr(self, 'visual_norm', None),
                 'percentile_scale': getattr(self, 'percentile_scale', None),
                 'zero_decoder_bbox': getattr(self, 'zero_decoder_bbox', False),
+                'aux_loss_weight': float(getattr(self, 'aux_loss_weight', 0.0) or 0.0),
             }
             with open(hyperparams_path, 'w', encoding='utf-8') as fid:
                 json.dump(hyperparams, fid, indent=2, default=str)
@@ -870,7 +902,7 @@ class PIEIntent(object):
                         patience=early_stop_patience,
                         verbose=0)
             
-            checkpoint = ModelCheckpoint(filepath=model_path,
+            checkpoint = MainModelCheckpoint(export_model=train_model, filepath=model_path,
                                         save_best_only=True,
                                         save_weights_only=False,
                                         monitor=train_config['learning_scheduler_params']['monitor_value'],
@@ -907,6 +939,22 @@ class PIEIntent(object):
                     self.total_epochs = total_epochs
                     self.history = []
 
+                def _predict_main(self, dataset):
+                    """Main-output probabilities; keeps every head's output for _head_aucs()."""
+                    out = self.model.predict(dataset, verbose=0)
+                    self._all_outputs = list(out) if isinstance(out, (list, tuple)) else [out]
+                    return np.asarray(self._all_outputs[0]).ravel()
+
+                def _head_aucs(self):
+                    """Per-branch AUC on val (only when aux heads exist). Call right after _predict_main(val)."""
+                    from sklearn.metrics import roc_auc_score
+                    y = np.asarray(self.val_y_true).ravel()
+                    result = {}
+                    for name, out in zip(self.model.output_names[1:], self._all_outputs[1:]):
+                        p = np.asarray(out).ravel()
+                        result[name] = float(roc_auc_score(y, p)) if len(np.unique(y)) > 1 else float('nan')
+                    return result
+
                 def _should_run_full_train_eval(self, epoch):
                     if self.eval_every is None:
                         return False
@@ -917,20 +965,21 @@ class PIEIntent(object):
                 def on_epoch_end(self, epoch, logs=None):
                     logs = logs or {}
 
-                    val_prob = self.model.predict(self.val_dataset, verbose=0).ravel()
+                    val_prob = self._predict_main(self.val_dataset)
                     val_m = compute_full_metrics(self.val_y_true, val_prob)
                     val_m['pred_mean'] = float(val_prob.mean())
                     val_m['pred_std'] = float(val_prob.std())
+                    head_auc = self._head_aucs() if len(self._all_outputs) > 1 else {}
                     logs['val_nll'] = val_m['nll']
                     logs['val_auc'] = val_m['roc_auc'] if not np.isnan(val_m['roc_auc']) else 0.0
-                    train_loss = logs.get('loss')
-                    val_loss = logs.get('val_loss')
+                    train_loss = logs.get('decoder_dense_loss', logs.get('loss'))
+                    val_loss = logs.get('val_decoder_dense_loss', logs.get('val_loss'))
 
                     run_full_train = self._should_run_full_train_eval(epoch)
 
                     train_m = None
                     if run_full_train:
-                        train_prob = self.model.predict(self.train_eval_dataset, verbose=0).ravel()
+                        train_prob = self._predict_main(self.train_eval_dataset)
                         train_m = compute_full_metrics(self.train_y_true, train_prob)
                         train_m['pred_mean'] = float(train_prob.mean())
                         train_m['pred_std'] = float(train_prob.std())
@@ -938,12 +987,16 @@ class PIEIntent(object):
                     test_m = None
                     test_loss = None
                     if self.test_dataset is not None and run_full_train:
-                        test_prob = self.model.predict(self.test_dataset, verbose=0).ravel()
+                        test_prob = self._predict_main(self.test_dataset)
                         test_m = compute_full_metrics(self.test_y_true, test_prob)
                         test_m['pred_mean'] = float(test_prob.mean())
                         test_m['pred_std'] = float(test_prob.std())
                         test_eval = self.model.evaluate(self.test_dataset, verbose=0)
-                        test_loss = float(test_eval[0]) if isinstance(test_eval, (list, tuple)) else float(test_eval)
+                        if isinstance(test_eval, (list, tuple)):
+                            named = dict(zip(self.model.metrics_names, test_eval))
+                            test_loss = float(named.get('decoder_dense_loss', test_eval[0]))
+                        else:
+                            test_loss = float(test_eval)
 
                     suffix = ""
                     if not run_full_train:
@@ -955,11 +1008,17 @@ class PIEIntent(object):
                     if train_m is not None:
                         self._print_row(epoch, 'train', train_m)
                     self._print_row(epoch, 'val', val_m)
+                    if head_auc:
+                        print(f"epoch {epoch+1:>3} [val branch AUC] " + " ".join(f"{k}={v:.4f}" for k, v in head_auc.items()))
                     if test_m is not None:
                         self._print_row(epoch, 'test', test_m)
 
                     record = {'epoch': epoch + 1, 'train_loss': train_loss,
                             'val_loss': val_loss, 'test_loss': test_loss}
+
+                    for k, v in head_auc.items():
+                        record[f'val_auc_{k}'] = v
+
                     for k, v in val_m.items():
                         record[f'val_{k}'] = v
                     if train_m is not None:
@@ -1030,7 +1089,7 @@ class PIEIntent(object):
             if seed is not None:
                 np.random.seed(seed)
             try:
-                train_model.fit(train_dataset,
+                fit_model.fit(train_dataset,
                                 epochs=epochs,
                                 steps_per_epoch=train_steps,
                                 validation_data=val_dataset,
