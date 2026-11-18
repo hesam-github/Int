@@ -239,6 +239,12 @@ def prepare_data(opts, data_opts, pie_path):
         from extra_features import attach_scene
         for split in (train, val, test):
             attach_scene(split, scene_dir)
+    if 'scene' in offline:
+        _require_dir(scene_dir, 'scene')
+        from extra_features import attach_scene, attach_scene_critical
+        for split in (train, val, test):
+            attach_scene(split, scene_dir)
+            attach_scene_critical(split, scene_dir)   # new targeted features
 
     lens = [len(track) for track in train['image']]
     print(f"tracks={len(lens)}  min_len={min(lens)}  max_len={max(lens)}")

@@ -104,6 +104,115 @@ def scene_features(label_map, bbox, scale=1.0):
         feats.extend((cnt / cnt.sum()).tolist())
     return feats
 
+def scene_critical_features(label_map, bbox, scale=1.0):
+    """Targeted 16-d scene features focused on critical objects relative to the pedestrian.
+
+    Components:
+      0-11 : fraction of {sidewalk, traffic_light, traffic_sign} in 4 regions
+             (under feet, left, right, front)  -> 3 classes x 4 regions
+      12   : normalized min distance to nearest sidewalk pixel (in bbox-height units)
+      13   : normalized min distance to nearest traffic-light pixel
+      14   : sidewalk fraction specifically under feet (repeated for emphasis)
+      15   : soft presence of traffic light in the front region (>0.01 fraction)
+
+    label_map: (H, W) uint8 Cityscapes trainId
+    bbox: [x1, y1, x2, y2] in original 1920x1080 pixels
+    scale: label_map_width / 1920
+    """
+    H, W = label_map.shape
+    x1, y1, x2, y2 = [v * scale for v in bbox]
+    w = max(x2 - x1, 1.0)
+    h = max(y2 - y1, 1.0)
+
+    # Critical class ids (Cityscapes trainId)
+    SIDEWALK = 1
+    TRAFFIC_LIGHT = 6
+    TRAFFIC_SIGN = 7
+    critical_ids = [SIDEWALK, TRAFFIC_LIGHT, TRAFFIC_SIGN]
+
+    regions = [
+        (x1 - 0.25 * w, y2 - 0.05 * h, x2 + 0.25 * w, y2 + 0.15 * h),  # under feet
+        (x1 - 1.5 * w, y1, x1, y2 + 0.15 * h),                         # left
+        (x2, y1, x2 + 1.5 * w, y2 + 0.15 * h),                         # right
+        (x1 - 0.5 * w, y2, x2 + 0.5 * w, y2 + 1.0 * h),                # front (between ped & camera)
+    ]
+
+    feats = []
+    under_feet_sidewalk = 0.0
+    front_tl_frac = 0.0
+
+    for ri, (xa, ya, xb, yb) in enumerate(regions):
+        xa = int(np.clip(round(xa), 0, W))
+        xb = int(np.clip(round(xb), 0, W))
+        ya = int(np.clip(round(ya), 0, H))
+        yb = int(np.clip(round(yb), 0, H))
+        patch = label_map[ya:yb, xa:xb]
+        if patch.size == 0:
+            feats.extend([0.0] * 3)
+            continue
+        total = float(patch.size)
+        for cid in critical_ids:
+            frac = float(np.sum(patch == cid)) / total
+            feats.append(frac)
+            if ri == 0 and cid == SIDEWALK:
+                under_feet_sidewalk = frac
+            if ri == 3 and cid == TRAFFIC_LIGHT:
+                front_tl_frac = frac
+
+    # Approximate min distance to nearest critical pixel (in units of bbox height)
+    # Use a coarse grid search over the whole map for simplicity and speed
+    def min_dist_to_class(class_id):
+        ys, xs = np.where(label_map == class_id)
+        if len(ys) == 0:
+            return 10.0  # large value = "not present"
+        # pedestrian foot center
+        px = 0.5 * (x1 + x2)
+        py = y2
+        dists = np.sqrt((xs - px) ** 2 + (ys - py) ** 2)
+        return float(np.min(dists)) / h
+
+    dist_sidewalk = min_dist_to_class(SIDEWALK)
+    dist_tl = min_dist_to_class(TRAFFIC_LIGHT)
+
+    feats.append(dist_sidewalk)
+    feats.append(dist_tl)
+    feats.append(under_feet_sidewalk)
+    feats.append(1.0 if front_tl_frac > 0.01 else 0.0)
+
+    assert len(feats) == 16
+    return feats
+
+
+def attach_scene_critical(beh_seq, label_dir, key='scene_critical', cache_size=64, verbose=True):
+    """Attach the 16-d targeted critical-object scene features.
+    Uses the same label maps as attach_scene.
+    """
+    from functools import lru_cache
+    from PIL import Image
+
+    @lru_cache(maxsize=cache_size)
+    def load(sid, vid, fr):
+        f = os.path.join(label_dir, sid, vid, f'{fr:05d}.png')
+        return np.asarray(Image.open(f)) if os.path.isfile(f) else None
+
+    out, missing, total = [], 0, 0
+    for i, paths in enumerate(beh_seq['image']):
+        track = []
+        for j, p in enumerate(paths):
+            total += 1
+            sid, vid, fr = _parse_frame_path(p)
+            lm = load(sid, vid, fr)
+            if lm is None:
+                missing += 1
+                track.append([0.0] * 16)
+            else:
+                track.append(scene_critical_features(
+                    lm, beh_seq['bbox'][i][j], scale=lm.shape[1] / 1920.0))
+        out.append(track)
+    beh_seq[key] = out
+    if verbose:
+        print(f'[scene_critical] frames without label map: {missing}/{total}')
+    return beh_seq
 
 def attach_scene(beh_seq, label_dir, key='scene', cache_size=64, verbose=True):
     """Adds beh_seq[key]: per track, per frame, a 24-d scene vector from <label_dir>/<set>/<video>/<frame:05d>.png

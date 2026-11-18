@@ -508,3 +508,62 @@ epoch  56 loss: train=1.3111 val=1.3305   (train/test full metrics off)
 epoch  56 [val  ] accuracy=0.6112 majority_acc=0.5429 precision=0.5443 recall=0.9189 specificity=0.3521 balanced_acc=0.6355 f1=0.6836 auc=0.7272 ap=0.6541 nll=0.6671 ece=0.1132 pmean=0.558 pstd=0.074
 epoch  57 loss: train=1.2990 val=1.3237   (train/test full metrics off)
 epoch  57 [val  ] accuracy=0.6076 majority_acc=0.5429 precision=0.5420 recall=0.9126 specificity=0.3507 balanced_acc=0.6316 f1=0.6801 auc=0.7283 ap=0.6481 nll=0.6675 ece=0.1207 pmean=0.561 pstd=0.075
+epoch  58 loss: train=1.2873 val=1.3167   (train/test full metrics off)
+epoch  58 [val  ] accuracy=0.6105 majority_acc=0.5429 precision=0.5438 recall=0.9173 specificity=0.3521 balanced_acc=0.6347 f1=0.6828 auc=0.7277 ap=0.6484 nll=0.6674 ece=0.1199 pmean=0.562 pstd=0.075
+epoch  59 loss: train=1.2816 val=1.3066   (train/test full metrics off)
+epoch  59 [val  ] accuracy=0.6170 majority_acc=0.5429 precision=0.5503 recall=0.8871 specificity=0.3896 balanced_acc=0.6383 f1=0.6792 auc=0.7309 ap=0.6517 nll=0.6641 ece=0.1174 pmean=0.558 pstd=0.078
+epoch  60 loss: train=1.2741 val=1.2987   (train/test full metrics off)
+epoch  60 [val  ] accuracy=0.6192 majority_acc=0.5429 precision=0.5520 recall=0.8855 specificity=0.3949 balanced_acc=0.6402 f1=0.6801 auc=0.7299 ap=0.6507 nll=0.6626 ece=0.1094 pmean=0.556 pstd=0.080
+epoch  61 loss: train=1.2683 val=1.2902   (train/test full metrics off)
+epoch  61 [val  ] accuracy=0.6257 majority_acc=0.5429 precision=0.5585 recall=0.8649 specificity=0.4244 balanced_acc=0.6446 f1=0.6787 auc=0.7299 ap=0.6510 nll=0.6604 ece=0.1103 pmean=0.556 pstd=0.084
+epoch  62 loss: train=1.2476 val=1.2829   (train/test full metrics off)
+epoch  62 [val  ] accuracy=0.6243 majority_acc=0.5429 precision=0.5583 recall=0.8521 specificity=0.4324 balanced_acc=0.6423 f1=0.6746 auc=0.7298 ap=0.6504 nll=0.6593 ece=0.1115 pmean=0.552 pstd=0.083
+epoch  63 loss: train=1.2467 val=1.2786   (train/test full metrics off)
+epoch  63 [val  ] accuracy=0.6163 majority_acc=0.5429 precision=0.5506 recall=0.8744 specificity=0.3989 balanced_acc=0.6367 f1=0.6757 auc=0.7282 ap=0.6490 nll=0.6610 ece=0.1065 pmean=0.556 pstd=0.084
+epoch  64 loss: train=1.2371 val=1.2725   (train/test full metrics off)
+epoch  64 [val  ] accuracy=0.6199 majority_acc=0.5429 precision=0.5538 recall=0.8680 specificity=0.4110 balanced_acc=0.6395 f1=0.6762 auc=0.7257 ap=0.6477 nll=0.6609 ece=0.1093 pmean=0.555 pstd=0.085
+epoch  65 loss: train=1.2275 val=1.2672   (train/test full metrics off)
+epoch  65 [val  ] accuracy=0.6250 majority_acc=0.5429 precision=0.5578 recall=0.8665 specificity=0.4217 balanced_acc=0.6441 f1=0.6787 auc=0.7233 ap=0.6458 nll=0.6612 ece=0.1045 pmean=0.556 pstd=0.086
+epoch  66 loss: train=1.2208 val=1.2606   (train/test full metrics off)
+epoch  66 [val  ] accuracy=0.6250 majority_acc=0.5429 precision=0.5598 recall=0.8410 specificity=0.4431 balanced_acc=0.6421 f1=0.6722 auc=0.7207 ap=0.6454 nll=0.6602 ece=0.1048 pmean=0.554 pstd=0.088
+epoch  67 loss: train=1.2188 val=1.2551   (train/test full metrics off)
+epoch  67 [val  ] accuracy=0.6294 majority_acc=0.5429 precision=0.5627 recall=0.8490 specificity=0.4444 balanced_acc=0.6467 f1=0.6768 auc=0.7199 ap=0.6453 nll=0.6602 ece=0.1090 pmean=0.552 pstd=0.087
+epoch  68 loss: train=1.2085 val=1.2482   (train/test full metrics off)
+epoch  68 [val  ] accuracy=0.6301 majority_acc=0.5429 precision=0.5640 recall=0.8410 specificity=0.4525 balanced_acc=0.6467 f1=0.6752 auc=0.7207 ap=0.6480 nll=0.6585 ece=0.1040 pmean=0.552 pstd=0.090
+epoch  69 loss: train=1.2038 val=1.2429   (train/test full metrics off)
+epoch  69 [val  ] accuracy=0.6315 majority_acc=0.5429 precision=0.5653 recall=0.8394 specificity=0.4565 balanced_acc=0.6480 f1=0.6756 auc=0.7189 ap=0.6505 nll=0.6584 ece=0.1075 pmean=0.551 pstd=0.091
+epoch  70 loss: train=1.1903 val=1.2368   (train/test full metrics off)
+epoch  70 [val  ] accuracy=0.6337 majority_acc=0.5429 precision=0.5691 recall=0.8188 specificity=0.4779 balanced_acc=0.6483 f1=0.6714 auc=0.7186 ap=0.6510 nll=0.6574 ece=0.1044 pmean=0.551 pstd=0.095
+epoch  71 loss: train=1.1794 val=1.2314   (train/test full metrics off)
+epoch  71 [val  ] accuracy=0.6337 majority_acc=0.5429 precision=0.5695 recall=0.8140 specificity=0.4819 balanced_acc=0.6480 f1=0.6702 auc=0.7179 ap=0.6514 nll=0.6569 ece=0.1072 pmean=0.553 pstd=0.097
+epoch  72 loss: train=1.1795 val=1.2265   (train/test full metrics off)
+epoch  72 [val  ] accuracy=0.6352 majority_acc=0.5429 precision=0.5716 recall=0.8060 specificity=0.4913 balanced_acc=0.6487 f1=0.6689 auc=0.7157 ap=0.6494 nll=0.6569 ece=0.1115 pmean=0.552 pstd=0.098
+epoch  73 loss: train=1.1694 val=1.2212   (train/test full metrics off)
+epoch  73 [val  ] accuracy=0.6374 majority_acc=0.5429 precision=0.5749 recall=0.7933 specificity=0.5060 balanced_acc=0.6497 f1=0.6667 auc=0.7166 ap=0.6577 nll=0.6562 ece=0.1146 pmean=0.550 pstd=0.099
+epoch  74 loss: train=1.1569 val=1.2158   (train/test full metrics off)
+epoch  74 [val  ] accuracy=0.6432 majority_acc=0.5429 precision=0.5812 recall=0.7854 specificity=0.5234 balanced_acc=0.6544 f1=0.6680 auc=0.7163 ap=0.6550 nll=0.6555 ece=0.1101 pmean=0.548 pstd=0.099
+epoch  75 loss: train=1.1523 val=1.2105   (train/test full metrics off)
+epoch  75 [val  ] accuracy=0.6403 majority_acc=0.5429 precision=0.5783 recall=0.7870 specificity=0.5167 balanced_acc=0.6518 f1=0.6667 auc=0.7161 ap=0.6525 nll=0.6547 ece=0.1120 pmean=0.550 pstd=0.101
+epoch  76 loss: train=1.1446 val=1.2060   (train/test full metrics off)
+epoch  76 [val  ] accuracy=0.6453 majority_acc=0.5429 precision=0.5828 recall=0.7886 specificity=0.5248 balanced_acc=0.6567 f1=0.6703 auc=0.7148 ap=0.6536 nll=0.6546 ece=0.0968 pmean=0.547 pstd=0.100
+epoch  77 loss: train=1.1428 val=1.2023   (train/test full metrics off)
+epoch  77 [val  ] accuracy=0.6432 majority_acc=0.5429 precision=0.5816 recall=0.7822 specificity=0.5261 balanced_acc=0.6541 f1=0.6671 auc=0.7124 ap=0.6524 nll=0.6553 ece=0.1054 pmean=0.548 pstd=0.101
+epoch  78 loss: train=1.1298 val=1.1970   (train/test full metrics off)
+epoch  78 [val  ] accuracy=0.6461 majority_acc=0.5429 precision=0.5864 recall=0.7663 specificity=0.5448 balanced_acc=0.6556 f1=0.6644 auc=0.7114 ap=0.6569 nll=0.6541 ece=0.1059 pmean=0.546 pstd=0.104
+epoch  79 loss: train=1.1229 val=1.1925   (train/test full metrics off)
+epoch  79 [val  ] accuracy=0.6475 majority_acc=0.5429 precision=0.5891 recall=0.7568 specificity=0.5556 balanced_acc=0.6562 f1=0.6625 auc=0.7108 ap=0.6535 nll=0.6538 ece=0.1054 pmean=0.544 pstd=0.105
+epoch  80 loss: train=1.1174 val=1.1883   (train/test full metrics off)
+epoch  80 [val  ] accuracy=0.6446 majority_acc=0.5429 precision=0.5862 recall=0.7568 specificity=0.5502 balanced_acc=0.6535 f1=0.6607 auc=0.7103 ap=0.6536 nll=0.6536 ece=0.1157 pmean=0.543 pstd=0.106
+epoch  81 loss: train=1.1090 val=1.1844   (train/test full metrics off)
+epoch  81 [val  ] accuracy=0.6461 majority_acc=0.5429 precision=0.5896 recall=0.7424 specificity=0.5649 balanced_acc=0.6537 f1=0.6573 auc=0.7077 ap=0.6514 nll=0.6536 ece=0.1151 pmean=0.543 pstd=0.107
+epoch  82 loss: train=1.0995 val=1.1802   (train/test full metrics off)
+epoch  82 [val  ] accuracy=0.6410 majority_acc=0.5429 precision=0.5875 recall=0.7202 specificity=0.5743 balanced_acc=0.6472 f1=0.6471 auc=0.7035 ap=0.6418 nll=0.6532 ece=0.0961 pmean=0.539 pstd=0.109
+epoch  83 loss: train=1.0919 val=1.1837   (train/test full metrics off)
+epoch  83 [val  ] accuracy=0.6177 majority_acc=0.5429 precision=0.5614 recall=0.7488 specificity=0.5074 balanced_acc=0.6281 f1=0.6417 auc=0.6907 ap=0.6261 nll=0.6605 ece=0.0984 pmean=0.555 pstd=0.117
+epoch  84 loss: train=1.0829 val=1.1810   (train/test full metrics off)
+epoch  84 [val  ] accuracy=0.6032 majority_acc=0.5429 precision=0.5469 recall=0.7695 specificity=0.4632 balanced_acc=0.6163 f1=0.6394 auc=0.6932 ap=0.6336 nll=0.6614 ece=0.1069 pmean=0.558 pstd=0.119
+epoch  85 loss: train=1.0722 val=1.1790   (train/test full metrics off)
+epoch  85 [val  ] accuracy=0.5887 majority_acc=0.5429 precision=0.5345 recall=0.7758 specificity=0.4311 balanced_acc=0.6034 f1=0.6329 auc=0.6926 ap=0.6277 nll=0.6630 ece=0.1115 pmean=0.561 pstd=0.119
+epoch  86 loss: train=1.0686 val=1.1740   (train/test full metrics off)
+epoch  86 [val  ] accuracy=0.6003 majority_acc=0.5429 precision=0.5456 recall=0.7520 specificity=0.4726 balanced_acc=0.6123 f1=0.6324 auc=0.6913 ap=0.6263 nll=0.6616 ece=0.1087 pmean=0.557 pstd=0.121
+epoch  87 loss: train=1.0566 val=1.1715   (train/test full metrics off)
