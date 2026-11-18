@@ -587,20 +587,39 @@ class PIEIntent(object):
     def _ensure_feature_memmap(self, images, bboxes, ped_ids, save_path,
                             feature_shape, data_type_label, chunk=32):
         """Write each split's VGG features into one sequential file, once.
-        Later epochs slice that file instead of unpickling every frame."""
+        Later epochs slice that file instead of unpickling every frame.
+
+        Cache key is stable for the default split configuration.
+        """
         import hashlib
         n = len(images)
         seq_len = len(images[0]) if n else 0
         feat_shape = tuple(int(d) for d in feature_shape)
         shape = (n, seq_len) + feat_shape
-        ident = hashlib.md5()
-        ident.update(
-            f"{PREP_TAG}|squarify={self.crop_squarify_ratio}|enlarge=2|pad_resize|vgg16".encode())
-        for seq, boxes, ped in zip(images, bboxes, ped_ids):
-            for frame, box, p in zip(seq, boxes, ped):
-                ident.update(os.fsencode(f"{frame}|{box}|{p}\0"))
-        digest = ident.hexdigest()[:12]
-        tag = f"stacked_{n}_{seq_len}_{digest}_" + "x".join(str(d) for d in feat_shape)
+
+        # Stable key: include only parameters that affect the feature content,
+        # not a full hash of every frame path (which can change with minor ordering).
+        key_parts = [
+            PREP_TAG,
+            f"squarify={self.crop_squarify_ratio}",
+            "enlarge=2",
+            "pad_resize",
+            "vgg16",
+            f"n={n}",
+            f"seq_len={seq_len}",
+            f"shape={feat_shape}",
+            data_type_label,
+        ]
+        # Optional: include a short hash of the first and last few identifiers
+        # so that a completely different sequence set is not silently reused.
+        sample_ids = []
+        if n > 0:
+            sample_ids.append(str(ped_ids[0][0][0]) if ped_ids and ped_ids[0] else "")
+            sample_ids.append(str(ped_ids[-1][0][0]) if ped_ids and ped_ids[-1] else "")
+        key_parts.append("|".join(sample_ids))
+
+        digest = hashlib.md5("|".join(key_parts).encode()).hexdigest()[:12]
+        tag = f"stacked_{data_type_label}_{n}_{seq_len}_{digest}_" + "x".join(str(d) for d in feat_shape)
         final_path = save_path + "_" + tag + ".dat"
         nbytes = int(np.prod(shape, dtype=np.int64)) * 4
 
@@ -624,8 +643,8 @@ class PIEIntent(object):
         finally:
             del mm
         os.replace(tmp_path, final_path)
+        print(f"[features] saved stacked cache -> {final_path}")
         return np.memmap(final_path, dtype=np.float32, mode="r", shape=shape)
-
 
     def _dataset_from_memmap(self, feature_mmap, decoder, output, batch_size, shuffle, repeat,
                              shuffle_seed=None):

@@ -699,3 +699,273 @@ FULL PER-EPOCH METRICS (from history.pkl -- Keras' own History callback)
     35        1.5541        1.5779        0.5881        0.4622        0.6988        0.6281         1e-05
     36        1.5429        1.5617        0.5837        0.4629        0.6967        0.6268         1e-05
     37        1.5269        1.5472        0.5889        0.4615        0.6958        0.6285         1e-05
+    38        1.5103        1.5325        0.5918        0.4615        0.6942        0.6382         1e-05
+    39        1.4994        1.5163        0.5840        0.4629        0.6907        0.6474         1e-05
+    40        1.4847        1.5026        0.5879        0.4608        0.6891        0.6596         1e-05
+    41        1.4691        1.4886        0.5945        0.4637        0.6871        0.6693         1e-05
+    42        1.4541        1.4736        0.6026        0.4658        0.6837        0.6783         1e-05
+    43        1.4394        1.4604        0.6055        0.4731        0.6816        0.6844         1e-05
+    44        1.4311        1.4470        0.5978        0.5131        0.6789        0.6925         1e-05
+    45        1.4168        1.4343        0.6038        0.5385        0.6766        0.6994         1e-05
+    46        1.4095        1.4228        0.6115        0.5632        0.6751        0.7046         1e-05
+    47        1.3970        1.4125        0.6081        0.5698        0.6744        0.7053         1e-05
+    48        1.3854        1.4024        0.6143        0.5756        0.6738        0.7064         1e-05
+    49        1.3801        1.3913        0.6030        0.5807        0.6717        0.7119         1e-05
+    50        1.3678        1.3822        0.6092        0.5836        0.6715        0.7123         1e-05
+    51        1.3555        1.3727        0.6150        0.6010        0.6705        0.7127         1e-05
+    52        1.3466        1.3624        0.6247        0.6076        0.6684        0.7173         1e-05
+    53        1.3359        1.3556        0.6204        0.6003        0.6696        0.7166         1e-05
+    54        1.3255        1.3479        0.6326        0.6047        0.6697        0.7179         1e-05
+    55        1.3169        1.3400        0.6338        0.6010        0.6693        0.7220         1e-05
+    56        1.3111        1.3305        0.6263        0.6112        0.6671        0.7272         1e-05
+    57        1.2990        1.3237        0.6292        0.6076        0.6675        0.7283         1e-05
+    58        1.2873        1.3167        0.6423        0.6105        0.6674        0.7277         1e-05
+    59        1.2816        1.3066        0.6373        0.6170        0.6641        0.7309         1e-05
+    60        1.2741        1.2987        0.6433        0.6192        0.6626        0.7299         1e-05
+    61        1.2683        1.2902        0.6390        0.6257        0.6604        0.7299         1e-05
+    62        1.2476        1.2829        0.6648        0.6243        0.6593        0.7298         1e-05
+    63        1.2467        1.2786        0.6551        0.6163        0.6610        0.7282         1e-05
+    64        1.2371        1.2725        0.6598        0.6199        0.6609        0.7257         1e-05
+    65        1.2275        1.2672        0.6613        0.6250        0.6612        0.7233         1e-05
+    66        1.2208        1.2606        0.6660        0.6250        0.6602        0.7207         1e-05
+    67        1.2188        1.2551        0.6638        0.6294        0.6602        0.7199         1e-05
+    68        1.2085        1.2482        0.6675        0.6301        0.6585        0.7207         1e-05
+    69        1.2038        1.2429        0.6629        0.6315        0.6584        0.7189         1e-05
+    70        1.1903        1.2368        0.6811        0.6337        0.6574        0.7186         1e-05
+    71        1.1794        1.2314        0.6888        0.6337        0.6569        0.7179         1e-05
+    72        1.1795        1.2265        0.6747        0.6352        0.6569        0.7157         1e-05
+    73        1.1694        1.2212        0.6797        0.6374        0.6562        0.7166         1e-05
+    74        1.1569        1.2158        0.6969        0.6432        0.6555        0.7163         1e-05
+    75        1.1523        1.2105        0.6892        0.6403        0.6547        0.7161         1e-05
+    76        1.1446        1.2060        0.7004        0.6453        0.6546        0.7148         1e-05
+    77        1.1428        1.2023        0.6944        0.6432        0.6553        0.7124         1e-05
+    78        1.1298        1.1970        0.7099        0.6461        0.6541        0.7114         1e-05
+    79        1.1229        1.1925        0.7060        0.6475        0.6538        0.7108         1e-05
+    80        1.1174        1.1883        0.7151        0.6446        0.6536        0.7103         1e-05
+    81        1.1090        1.1844        0.7173        0.6461        0.6536        0.7077         1e-05
+    82        1.0995        1.1802        0.7194        0.6410        0.6532        0.7035         1e-05
+    83        1.0919        1.1837        0.7254        0.6177        0.6605        0.6907         1e-05
+    84        1.0829        1.1810        0.7287        0.6032        0.6614        0.6932         1e-05
+    85        1.0722        1.1790        0.7440        0.5887        0.6630        0.6926         1e-05
+    86        1.0686        1.1740        0.7345        0.6003        0.6616        0.6913         1e-05
+    87        1.0566        1.1715        0.7508        0.6061        0.6625        0.6892         1e-05
+    88        1.0506        1.1697        0.7523        0.6112        0.6640        0.6863         1e-05
+    89        1.0437        1.1695        0.7568        0.5996        0.6671        0.6836         1e-05
+    90        1.0349        1.1640        0.7585        0.6126        0.6649        0.6846         1e-05
+    91        1.0280        1.1655        0.7637        0.6017        0.6696        0.6810         1e-05
+    92        1.0197        1.1560        0.7719        0.6265        0.6631        0.6862         1e-05
+    93        1.0132        1.1566        0.7715        0.6192        0.6668        0.6823         1e-05
+    94        1.0052        1.1515        0.7725        0.6257        0.6647        0.6841         1e-05
+    95        1.0021        1.1516        0.7777        0.6163        0.6677        0.6795         1e-05
+    96        0.9927        1.1457        0.7854        0.6374        0.6647        0.6812         1e-05
+    97        0.9873        1.1430        0.7872        0.6286        0.6648        0.6749         1e-05
+    98        0.9834        1.1418        0.7841        0.6185        0.6664        0.6761         1e-05
+    99        0.9667        1.1402        0.7994        0.6163        0.6674        0.6730         1e-05
+   100        0.9654        1.1314        0.8023        0.6265        0.6613        0.6792         1e-05
+   101        0.9619        1.1310        0.8013        0.6156        0.6636        0.6776         1e-05
+   102        0.9554        1.1302        0.8050        0.6148        0.6654        0.6748         1e-05
+   103        0.9472        1.1282        0.8156        0.6126        0.6659        0.6743         1e-05
+   104        0.9376        1.1260        0.8106        0.6068        0.6663        0.6771         1e-05
+   105        0.9342        1.1156        0.8160        0.6265        0.6583        0.6783         1e-05
+   106        0.9309        1.1168        0.8145        0.6206        0.6619        0.6776         1e-05
+   107        0.9178        1.1174        0.8199        0.6119        0.6650        0.6785         1e-05
+   108        0.9072        1.1150        0.8265        0.6141        0.6649        0.6796         1e-05
+   109        0.9044        1.1121        0.8216        0.6126        0.6643        0.6749         1e-05
+   110        0.9021        1.1144        0.8313        0.6199        0.6690        0.6714         1e-05
+   111        0.8941        1.1081        0.8306        0.6228        0.6649        0.6763         1e-05
+   112        0.8862        1.1066        0.8385        0.6199        0.6656        0.6782         1e-05
+   113        0.8755        1.0997        0.8441        0.6257        0.6609        0.6831         1e-05
+   114        0.8681        1.0965        0.8466        0.6243        0.6599        0.6810         1e-05
+   115        0.8636        1.0970        0.8462        0.6257        0.6626        0.6797         1e-05
+   116        0.8575        1.0980        0.8482        0.6235        0.6656        0.6743         1e-05
+   117        0.8518        1.0963        0.8561        0.6286        0.6659        0.6726         1e-05
+   118        0.8427        1.1024        0.8612        0.6156        0.6741        0.6705         1e-05
+   119        0.8390        1.1004        0.8561        0.6177        0.6741        0.6704         1e-05
+   120        0.8320        1.1004        0.8571        0.6170        0.6751        0.6694         5e-06
+   121        0.8246        1.0971        0.8644        0.6214        0.6728        0.6693         5e-06
+   122        0.8224        1.1004        0.8635        0.6192        0.6770        0.6668         5e-06
+   123        0.8215        1.1044        0.8693        0.6105        0.6820        0.6619         5e-06
+   124        0.8119        1.1026        0.8726        0.6112        0.6812        0.6634         5e-06
+   125        0.8099        1.1051        0.8734        0.6076        0.6842        0.6619       2.5e-06
+   126        0.8107        1.1025        0.8716        0.6148        0.6820        0.6629       2.5e-06
+   127        0.8133        1.1047        0.8693        0.6061        0.6848        0.6618       2.5e-06
+========================================================================================================
+
+>>> Full per-split evaluation (train, val, test)
+    Re-runs the BEST checkpoint over each split at overlap=1, saving predictions + full metrics to disk. This is the authoritative number for the run, not the per-epoch numbers printed during training.
+
+>>> Final evaluation on the 'train' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,837,953 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\ped_intents_train.pkl
+[note] 'train' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[train] metrics at threshold=0.5 -- accuracy: 0.8719  F1: 0.8703
+[train] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_train.json
+  accuracy: 0.8718560520997081
+  majority_acc: 0.5108634628340445
+  precision: 0.8615609536662169
+  recall: 0.8793113342898135
+  specificity: 0.8647178416396505
+  balanced_acc: 0.872014587964732
+  f1: 0.8703456502598768
+  roc_auc: 0.9085846645364892
+  pr_auc: 0.9023122942345809
+  nll: 0.46046122336506534
+  ece: 0.18094304282541973
+  brier_score: 0.142753849458823
+  confusion_matrix: [[15737, 2462], [2103, 15322]]
+  n_test_samples: 35624
+  positive_rate_gt: 0.4891365371659555
+  threshold_used: 0.5
+
+>>> Final evaluation on the 'val' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,837,953 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\ped_intents_val.pkl
+[note] 'val' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[val] metrics at threshold=0.5 -- accuracy: 0.6245  F1: 0.6296
+[val] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_val.json
+  accuracy: 0.6245384534233569
+  majority_acc: 0.543622745015297
+  precision: 0.5725913306833239
+  recall: 0.6992602866389274
+  specificity: 0.5618086551523385
+  balanced_acc: 0.6305344708956329
+  f1: 0.629618066396087
+  roc_auc: 0.6718872003516259
+  pr_auc: 0.6155253954612656
+  nll: 0.6670038441971671
+  ece: 0.09127719229831388
+  brier_score: 0.23460364410857062
+  confusion_matrix: [[2895, 2258], [1301, 3025]]
+  n_test_samples: 9479
+  positive_rate_gt: 0.45637725498470305
+  threshold_used: 0.5
+
+>>> Final evaluation on the 'test' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,837,953 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\ped_intents_test.pkl
+[note] 'test' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[test] metrics at threshold=0.5 -- accuracy: 0.7632  F1: 0.8481
+[test] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_test.json
+  accuracy: 0.7632149742930592
+  majority_acc: 0.8211760925449871
+  precision: 0.8959773556148277
+  recall: 0.8051261983956173
+  specificity: 0.5707547169811321
+  balanced_acc: 0.6879404576883748
+  f1: 0.8481257245910087
+  roc_auc: 0.7583673240779756
+  pr_auc: 0.9241866132058322
+  nll: 0.49574849954182737
+  ece: 0.1773955669196605
+  brier_score: 0.16182805906707257
+  confusion_matrix: [[5082, 3822], [7968, 32920]]
+  n_test_samples: 49792
+  positive_rate_gt: 0.8211760925449871
+  threshold_used: 0.5
+
+>>> Threshold calibration
+    Sweeps decision thresholds 0.05-0.95 and picks the one that maximizes F1 -- using VAL labels ONLY, never test -- since picking a threshold on test would leak test information into the reported numbers.
+[calibration] best threshold on val = 0.44 (val f1 = 0.6354)
+
+>>> Recomputing all splits at the calibrated threshold
+    Applies the val-selected threshold to predictions already saved above -- no re-inference, just re-thresholding the same probabilities, so this step is fast.
+[train] CALIBRATED metrics (threshold=0.44) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_train_calibrated.json
+  accuracy: 0.8651190208847968
+  majority_acc: 0.5108634628340445
+  precision: 0.8314423784010926
+  recall: 0.9084074605451937
+  specificity: 0.8236716303093576
+  balanced_acc: 0.8660395454272757
+  f1: 0.8682225817952445
+  roc_auc: 0.9085846645364892
+  pr_auc: 0.9023122942345809
+  nll: 0.46046122336506534
+  ece: 0.18094304282541973
+  brier_score: 0.142753849458823
+  confusion_matrix: [[14990, 3209], [1596, 15829]]
+  n_test_samples: 35624
+  positive_rate_gt: 0.4891365371659555
+  threshold_used: 0.44000000000000006
+[val] CALIBRATED metrics (threshold=0.44) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_val_calibrated.json
+  accuracy: 0.609874459331153
+  majority_acc: 0.543622745015297
+  precision: 0.5539889958734525
+  recall: 0.7447988904299584
+  specificity: 0.49660392004657483
+  balanced_acc: 0.6207014052382667
+  f1: 0.635377637546835
+  roc_auc: 0.6718872003516259
+  pr_auc: 0.6155253954612656
+  nll: 0.6670038441971671
+  ece: 0.09127719229831388
+  brier_score: 0.23460364410857062
+  confusion_matrix: [[2559, 2594], [1104, 3222]]
+  n_test_samples: 9479
+  positive_rate_gt: 0.45637725498470305
+  threshold_used: 0.44000000000000006
+[test] CALIBRATED metrics (threshold=0.44) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_test_calibrated.json
+  accuracy: 0.7866926413881749
+  majority_acc: 0.8211760925449871
+  precision: 0.8837386210918681
+  recall: 0.8523772255918607
+  specificity: 0.485062893081761
+  balanced_acc: 0.6687200593368108
+  f1: 0.8677746654217242
+  roc_auc: 0.7583673240779756
+  pr_auc: 0.9241866132058322
+  nll: 0.49574849954182737
+  ece: 0.1773955669196605
+  brier_score: 0.16182805906707257
+  confusion_matrix: [[4319, 4585], [6036, 34852]]
+  n_test_samples: 49792
+  positive_rate_gt: 0.8211760925449871
+  threshold_used: 0.44000000000000006
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\loss_curve.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\epoch_curves.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\metrics_comparison_thresh05.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit\metrics_plots\metrics_comparison_calibrated.png
+
+======================================================================
+SUMMARY -- ALL SPLITS (threshold=0.5)
+[note] overlap=1 for all splits above -- not comparable to per-epoch val/test numbers printed during training (seq_overlap_rate=0.5).
+======================================================================
+            metric       train         val        test
+          accuracy      0.8719      0.6245      0.7632
+      majority_acc      0.5109      0.5436      0.8212
+         precision      0.8616      0.5726      0.8960
+            recall      0.8793      0.6993      0.8051
+       specificity      0.8647      0.5618      0.5708
+      balanced_acc      0.8720      0.6305      0.6879
+                f1      0.8703      0.6296      0.8481
+           roc_auc      0.9086      0.6719      0.7584
+            pr_auc      0.9023      0.6155      0.9242
+               nll      0.4605      0.6670      0.4957
+               ece      0.1809      0.0913      0.1774
+       brier_score      0.1428      0.2346      0.1618
+  positive_rate_gt      0.4891      0.4564      0.8212
+    threshold_used      0.5000      0.5000      0.5000
+
+======================================================================
+SUMMARY -- ALL SPLITS (calibrated threshold=0.44)
+[note] same overlap=1 predictions, re-thresholded with the val-selected threshold 0.44.
+======================================================================
+            metric       train         val        test
+          accuracy      0.8651      0.6099      0.7867
+      majority_acc      0.5109      0.5436      0.8212
+         precision      0.8314      0.5540      0.8837
+            recall      0.9084      0.7448      0.8524
+       specificity      0.8237      0.4966      0.4851
+      balanced_acc      0.8660      0.6207      0.6687
+                f1      0.8682      0.6354      0.8678
+           roc_auc      0.9086      0.6719      0.7584
+            pr_auc      0.9023      0.6155      0.9242
+               nll      0.4605      0.6670      0.4957
+               ece      0.1809      0.0913      0.1774
+       brier_score      0.1428      0.2346      0.1618
+  positive_rate_gt      0.4891      0.4564      0.8212
+    threshold_used      0.4400      0.4400      0.4400
+[threshold] train positive rate: tracks=0.5000 windows(overlap=1)=0.4891
+[threshold] decision_threshold=0.5: raw@0.5 and prior-corrected@0.5 are already reported above.
