@@ -234,7 +234,7 @@ def prepare_data(opts, data_opts, pie_path):
         for split in (train, val, test):
             attach_pose(split, pose_dir, scale=opts.get('pose_scale', 'bbox_relative'),
                         min_bbox_height=opts.get('pose_min_height', 0))
-                        
+
     if 'scene' in offline:
         _require_dir(scene_dir, 'scene')
         from extra_features import attach_scene, attach_scene_critical
@@ -273,11 +273,10 @@ def prepare_data(opts, data_opts, pie_path):
               "no flow_* feature will appear in the menu.")
     else:
         _require_dir(flow_dir, 'flow')
+        from extra_features import attach_flow, attach_flow_relative
         for split in (train, val, test):
             attach_flow(split, flow_dir, verbose=(split is train))
-            attach_flow_relative(train)
-            attach_flow_relative(val)
-            attach_flow_relative(test)
+            attach_flow_relative(split, verbose=(split is train))
 
     print_phase(PHASE_LOSS_FINALIZE)
     from focal_loss import bce_plus_focal_loss
