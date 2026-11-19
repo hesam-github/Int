@@ -1,0 +1,176 @@
+{
+  "spec": {
+    "use_visual": "y",
+    "bbox_mode": "0",
+    "visual_norm": "n",
+    "percentile": "n",
+    "capacity": "1",
+    "log1p": "n",
+    "rs": "n",
+    "seed": 1,
+    "run_id": "ox_y0nnnn_c1_s1",
+    "cfg_id": "ox_y0nnnn_c1",
+    "run_tag": "hfedd20cd",
+    "run_dir": "D:\\PIE codes\\PIE\\sweep_runs_default\\ox_y0nnnn_c1_s1",
+    "split": "default"
+  },
+  "feeder_audit": [
+    {
+      "menu": "interactive_pick_offline_features",
+      "answer": "n"
+    },
+    {
+      "menu": "interactive_pick_use_visual",
+      "answer": "y"
+    },
+    {
+      "menu": "interactive_pick_zero_decoder_bbox",
+      "answer": "0"
+    },
+    {
+      "menu": "interactive_pick_visual_norm",
+      "answer": "n"
+    },
+    {
+      "menu": "visual_percentile",
+      "answer": "n"
+    },
+    {
+      "menu": "interactive_pick_capacity",
+      "answer": "1"
+    },
+    {
+      "menu": "interactive_pick_capacity",
+      "answer": "n"
+    },
+    {
+      "menu": "interactive_pick_capacity",
+      "answer": "n"
+    },
+    {
+      "menu": "interactive_pick_log_mode",
+      "answer": "0"
+    },
+    {
+      "menu": "interactive_pick_balance_mode",
+      "answer": "1"
+    },
+    {
+      "menu": "interactive_pick_monitor_metric",
+      "answer": "2"
+    },
+    {
+      "menu": "interactive_pick_loss_choice",
+      "answer": "0"
+    },
+    {
+      "menu": "interactive_pick_weight_decay",
+      "answer": ""
+    },
+    {
+      "menu": "interactive_pick_lstm_recurrent_activation",
+      "answer": "2"
+    },
+    {
+      "menu": "interactive_pick_normalize_bbox",
+      "answer": "0"
+    },
+    {
+      "menu": "plateau",
+      "answer": "y"
+    },
+    {
+      "menu": "interactive_pick_eval_every",
+      "answer": "4"
+    },
+    {
+      "menu": "tte",
+      "answer": "n"
+    },
+    {
+      "menu": "interactive_pick_data_split",
+      "answer": "0"
+    },
+    {
+      "menu": "interactive_pick_seeds",
+      "answer": "1"
+    },
+    {
+      "menu": "interactive_pick_seeds",
+      "answer": ""
+    },
+    {
+      "menu": "interactive_pick_seeds",
+      "answer": "42"
+    },
+    {
+      "menu": "interactive_pick_decoder_features",
+      "answer": "0"
+    },
+    {
+      "menu": "interactive_pick_extra_norm",
+      "answer": "0"
+    },
+    {
+      "menu": "interactive_pick_architecture",
+      "answer": "1"
+    },
+    {
+      "menu": "interactive_pick_new_run_name",
+      "answer": "hfedd20cd_s1"
+    }
+  ],
+  "HP": {
+    "framework": "tensorflow",
+    "lr": 1e-05,
+    "clipvalue": null,
+    "batch_size": 64,
+    "hidden_units": 128,
+    "reg": 0.001,
+    "lstm_dropout": 0.4,
+    "lstm_recurrent_dropout": 0.2,
+    "convlstm_filters": 64,
+    "convlstm_kernel": 2,
+    "es_min_delta": 0.0001,
+    "es_patience": 10,
+    "plateau_patience": 5,
+    "plateau_factor": 0.5,
+    "plateau_min_lr": 1e-07,
+    "plateau_min_delta": 0.001,
+    "n_epochs": 400,
+    "seed": 1,
+    "data_seed": 42,
+    "split_seed": 42,
+    "deterministic_ops": true,
+    "attach_pose": false,
+    "log_mode": "clean",
+    "threshold_space": "raw",
+    "decision_threshold": 0.5
+  },
+  "DATA_OPTS": {
+    "fstride": 1,
+    "sample_type": "all",
+    "height_rng": [
+      0,
+      Infinity
+    ],
+    "squarify_ratio": 0,
+    "data_split_type": "default",
+    "seq_type": "intention",
+    "min_track_size": 0,
+    "max_size_observe": 15,
+    "max_size_predict": 5,
+    "seq_overlap_rate": 0.5,
+    "balance": true,
+    "crop_type": "context",
+    "crop_mode": "pad_resize",
+    "encoder_input_type": [],
+    "decoder_input_type": [
+      "bbox"
+    ],
+    "output_type": [
+      "intention_binary"
+    ]
+  },
+  "python": "3.10.11 | packaged by conda-forge | (main, May 10 2023, 18:51:25) [MSC v.1934 64 bit (AMD64)]"
+}

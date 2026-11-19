@@ -354,6 +354,34 @@ def attach_flow(beh_seq, flow_root, verbose=True):
                   f'zero frames {zero_frames}/{total} ({100 * zero_frames / max(total, 1):.1f}%)')
     return attached
 
+def attach_flow_relative(beh_seq, verbose=True):
+    """Derived residual flow features from already-attached flow_* keys.
+    flow_rel_ped_crop = flow_ped - flow_crop
+    flow_rel_bbox_crop = flow_bbox - flow_crop
+    Requires attach_flow to have been called first.
+    """
+    required = ['flow_ped', 'flow_crop']
+    if not all(k in beh_seq for k in required):
+        print('[flow_relative] missing required flow keys; skipped')
+        return beh_seq
+
+    n_tracks = len(beh_seq['image'])
+    rel_ped, rel_bbox = [], []
+    for i in range(n_tracks):
+        ped = np.asarray(beh_seq['flow_ped'][i], dtype=np.float32)
+        crop = np.asarray(beh_seq['flow_crop'][i], dtype=np.float32)
+        rel_ped.append((ped - crop).tolist())
+        if 'flow_bbox' in beh_seq:
+            bbox = np.asarray(beh_seq['flow_bbox'][i], dtype=np.float32)
+            rel_bbox.append((bbox - crop).tolist())
+        else:
+            rel_bbox.append([[0.0, 0.0]] * len(ped))
+
+    beh_seq['flow_rel_ped_crop'] = rel_ped
+    beh_seq['flow_rel_bbox_crop'] = rel_bbox
+    if verbose:
+        print('[flow_relative] attached flow_rel_ped_crop and flow_rel_bbox_crop')
+    return beh_seq
 
 def attach_tte(beh_seq, key='tte', verbose=True):
     """Frames remaining until the track's last frame (the critical point).

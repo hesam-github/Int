@@ -1,0 +1,403 @@
+
+[offline_features] use the features you processed offline?
+  [n] none  -- no disk reads at all (fastest; bbox / velocity / annotation features only)
+  [a] all
+  [0] pose: YOLO keypoints (extra/pose)
+  [1] scene: SegFormer label maps -> 24-d scene vector (extra/scene)
+  [2] flow: optical flow summaries (extra/flow)
+  Enter comma-separated indices (e.g. 0,2), 'a' or 'n'. [default: all]
+[feeder] interactive_pick_offline_features <- 'n'
+[config] OFFLINE_FEATURES = []
+
+[use_visual] does the model need the VGG16 image context?
+  [n] no  -- VGG16 is NOT loaded. Decoder only (bbox, velocity, annotations, offline pose/scene/flow).
+  [y] yes -- VGG16 context feeds the ConvLSTM encoder. Slow: extracts features for every frame.  <-- default
+[feeder] interactive_pick_use_visual <- 'y'
+[config] USE_VISUAL = True
+
+[bbox_mode] decoder bbox columns:
+  [0] normal: bbox used as selected  <-- default
+  [1] zero: bbox columns = 0 (visual-only diagnostic; bbox_branch is zeroed too)
+      note: the VGG crop is still cut around the person, so it still encodes position and size
+[feeder] interactive_pick_zero_decoder_bbox <- '0'
+[config] ZERO_DECODER_BBOX = False
+
+[visual_norm] standardize VGG16 conv5 maps per channel before the ConvLSTM?
+  [n] no  -- raw VGG16 activations, as cached  <-- default
+  [y] yes -- (x - mean_train) / std_train per channel; statistics from TRAIN only
+[feeder] interactive_pick_visual_norm <- 'n'
+[config] VISUAL_NORM = False
+[feeder] visual_percentile <- 'n'
+[config] USE_PERCENTILE = False
+
+[capacity] presets for the visual branch (every choice except the baseline deviates from the paper):
+  [0] baseline (paper design)  <-- default
+  [1] A: 1x1 bottleneck after ConvLSTM (64 -> 8)
+  [2] B: 1x1 input projection (512 -> 64)
+  [3] A+B
+  [4] A+B with decoder hidden units 64
+  [5] custom (asked step by step)
+[feeder] interactive_pick_capacity <- '2'
+[feeder] interactive_pick_capacity <- 'n'
+[feeder] interactive_pick_capacity <- 'n'
+
+[capacity] parameter budget (visual branch + decoder):
+  input 1x1 conv 512 -> 64                                    32,832
+  ConvLSTM2D 64 -> 64, kernel 2, valid                       131,328
+  decoder LSTM in=2308 (flat 2304 + bbox 4), units=128     1,247,744
+  decoder Dense 128 -> 1                                         129
+  ------------------------------------------------------------------
+  TOTAL                                                    1,412,033
+  share of baseline                                            76.8%
+[capacity] decoder LSTM input width = 2308
+[capacity] WARNING: still above 50% of the baseline. An ablation at this size may not isolate capacity from information content.
+[capacity] note: the decoder LSTM still reads a 2304-wide flatten. Most parameters remain. Add A to reduce it.
+[capacity] reminder: any reduction deviates from the paper. Report it as an ablation and compare with a parameter-matched bbox-only control.
+[config] CAPACITY = {'convlstm_filters': 64, 'log1p': False, 'encoder_reduce': 0, 'input_reduce': 64, 'hidden_units': 128, 'return_sequences': False}
+
+[visual_pipeline] experiment A: VGG -> ConvLSTM  (raw)
+
+[log_mode] choose console verbosity for this run:
+  [0] clean  (phase explanations + meaningful metrics only (recommended))  <-- default
+  [1] full  (everything, including raw config dumps (original behavior))
+[feeder] interactive_pick_log_mode <- '0'
+[config] LOG_MODE = clean
+
+[balance_mode] existing balancing strategies:
+  [0] augmentation  (custom method -- geometric + photometric + temporal (shift/speed/occlusion) + micro-jitter)  <-- default
+  [1] undersample_base_article  (PIEPredict-style undersampling (not verified identical to the reference code))
+  [2] none  (no balancing -- raw imbalanced train/val (use with weighted_bce/focal_loss))
+[feeder] interactive_pick_balance_mode <- '1'
+[config] BALANCE_MODE = undersample_base_article
+
+[monitor_metric] choose what EarlyStopping/Checkpoint/Plateau monitor:
+  [0] val_nll (min)  -- validation NLL, data term only (no L2)  <-- default
+  [1] val_auc (max)  -- validation ROC-AUC
+  [2] val_loss (min)  -- validation loss incl. L2 (not a generalization metric)
+[feeder] interactive_pick_monitor_metric <- '2'
+[config] MONITOR_METRIC = val_loss (mode=min)
+
+[loss_function] choose the training loss function:
+  [0] binary_crossentropy  (standard BCE loss)  <-- default
+  [1] focal_loss           (focal loss for class imbalance)
+  [2] weighted_bce         (pos_weight computed AUTOMATICALLY from the train split's real class counts, after balancing/augmentation is applied)
+  [3] composite            (CE + optional focal / smoothing / confidence / ranking)
+  [4] weighted_bce + focal  (weighted BCE + focal; pos_weight automatic or custom)
+[feeder] interactive_pick_loss_choice <- '0'
+[config] LOSS_FUNCTION (family) = binary_crossentropy
+
+[weight_decay] RMSprop weight_decay in TF 2.10.1 / Keras 2.10.0:
+  NOT SUPPORTED. Keras 2.10.0's RMSprop has no 'weight_decay' argument -- any non-zero value crashes at optimizer construction.
+  L2 regularization in this project comes from REGULARIZER_VAL (kernel/recurrent/bias regularizers), which is unaffected by this.
+[feeder] interactive_pick_weight_decay <- ''
+[weight_decay] weight_decay = 0.0
+[config] WEIGHT_DECAY = 0.0
+
+[lstm_recurrent_activation]
+  1) sigmoid       (current code default)
+  2) hard_sigmoid  (official model.h5)
+[feeder] interactive_pick_lstm_recurrent_activation <- '2'
+
+[normalize_bbox] decoder bbox representation:
+  [0] raw pixels (x1, y1, x2, y2). Same as earlier runs; large values saturate the gates
+  [1] centre-x/W, ground-y/H, log(h/H)/5, log(w/W)/5. Keeps size and ground-position cues
+  (default: [1])
+[feeder] interactive_pick_normalize_bbox <- '0'
+[config] normalize_decoder_bbox = False
+[feeder] plateau <- 'y'
+[config] LSTM_REC_ACT=hard_sigmoid NORM_BBOX=False USE_PLATEAU=True
+
+[eval_every] how often to compute full train/test metrics during training:
+  [0] every epoch
+  [1] every 5 epochs  <-- default
+  [2] every 10 epochs
+  [3] custom N
+  [4] never (train/test full metrics off; val still every epoch)
+[feeder] interactive_pick_eval_every <- '4'
+[config] EVAL_EVERY = never
+[config] POSE_SCALE = bbox_relative  POSE_MIN_HEIGHT = 0
+[feeder] tte <- 'n'
+[config] USE_TTE = False
+[config] preset=undersample_base_article: lr=1e-05 clip_type=none clip_amount=None batch_size=64 normalize_decoder_bbox=False
+[config] CLIP_TYPE = none  CLIP_AMOUNT = None
+[config] BATCH_SIZE = 64  (hp requested 64)
+
+[data_split_type] existing split strategies (verified against pie_data.py):
+  [0] default  (fixed video-SET split: train=[set01,02,04] val=[set05,06] test=[set03] -- matches aras62/PIEPredict/train_test.py CODE (not the paper's stated random 50/40/10 text))  <-- default
+  [1] random  (random PEDESTRIAN-id split, ratios you choose -- matches the paper TEXT's described 50/40/10 protocol)
+  [2] kfold  (k-fold pedestrian-id split -- PIE only gives train/test per fold, val must be carved out of train manually (handled automatically below))
+[feeder] interactive_pick_data_split <- '0'
+[config] data_split_type = default
+
+[seed] independent seeds:
+  train  : weight init, dropout masks
+  shuffle: epoch order of training windows (Enter = same as train seed)
+  data   : undersampling / augmentation draws
+[feeder] interactive_pick_seeds <- '1'
+[feeder] interactive_pick_seeds <- ''
+[feeder] interactive_pick_seeds <- '42'
+  split  : not used (default split is fixed by video sets)
+[config] TRAIN_SEED=1 SHUFFLE_SEED=1 DATA_SEED=42 SPLIT_SEED=42
+
+>>> Building train/val/test sequences
+    Loads or builds the (train, val, test) pedestrian tracks according to data_split_type -- cached to disk by content hash, so repeated runs with identical settings are instant.
+D:\PIE codes\PIE_dataset\annotations\set01\video_0001_annt.xml
+[annotations] video set01/video_0001
+[annotations] per-frame pedestrian fields: ['bbox', 'occlusion', 'action', 'cross', 'gesture', 'look']
+[annotations] center is computed from bbox, not stored in the XML
+[annotations] obd_speed and gps_speed belong to the vehicle, not the pedestrian
+Building train/val sequences...
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_train_6f0c86110d467b31.pkl
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_val_44158d841427814d.pkl
+Building test sequence...
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_test_85a2ec5407cc03fe.pkl
+tracks=880  min_len=10  max_len=435
+tracks shorter than 0: 0
+
+>>> Applying balance strategy
+    Controls whether the RAW class imbalance in train/val is kept as-is (relying on the loss function to compensate), fixed by discarding majority-class samples (undersampling), or fixed by generating synthetic minority-class copies (augmentation).
+Balancing train/val via UNDERSAMPLING (data_seed=42)...
+---------------------------------------------------------
+Balancing the number of positive and negative intention samples
+Unbalanced: 	 Positive: 639 	 Negative: 241
+Balanced:	 Positive: 241  	 Negative: 241
+
+---------------------------------------------------------
+Balancing the number of positive and negative intention samples
+Unbalanced: 	 Positive: 181 	 Negative: 62
+Balanced:	 Positive: 62  	 Negative: 62
+
+[flow] not selected: nothing loaded
+
+>>> Finalizing the loss function
+    For weighted_bce, pos_weight is computed HERE from the TRAIN split's real, final class counts (after any balancing above) -- never from val/test, and never a hardcoded guess.
+[config] LOSS_FUNCTION (final) = binary_crossentropy
+[config] DATA_SPLIT_TAG = defaultSplit
+
+[feature check] numeric / empty / class gap:
+  bbox: dim=4 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=301.1675 max|mean_pos-mean_neg|=nan
+  center: dim=2 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=296.4361 max|mean_pos-mean_neg|=nan
+  occlusion: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.566 std=0.3783 max|mean_pos-mean_neg|=nan
+  gesture: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.994 std=0.0900 max|mean_pos-mean_neg|=nan
+  look: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.620 std=0.2954 max|mean_pos-mean_neg|=nan
+  action: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.471 std=0.4626 max|mean_pos-mean_neg|=nan
+  cross: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.944 std=0.1284 max|mean_pos-mean_neg|=nan
+  velocity: dim=4 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=0.0155 max|mean_pos-mean_neg|=nan
+
+[decoder_features] decoder input = bbox (always) + optional extras:
+  [0] bbox only  (raw bbox, 4 numbers; plus VGG16 context)  <-- default
+  [1] +center  (2 numbers per frame)  -- derived from bbox, redundant
+  [2] +occlusion  (1 numbers per frame)
+  [3] +gesture  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [4] +look  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [5] +action  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [6] +cross  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [7] +velocity  (4 numbers per frame)
+  [8] +bbox_branch  (4 numbers per frame)  -- separate copy of the raw bbox, its own parallel branch (scaling asked next)
+[feeder] interactive_pick_decoder_features <- '0'
+[config] decoder_input_type = ['bbox']
+
+[extra_norm] scaling of pose/occlusion/scene columns (not bbox):
+  [0] none: leave extras as attach_* wrote them.  <-- default
+  [1] zscore: train mean/std on extra columns only, applied to val and test. Bbox is still raw, so bbox can still dominate.
+[feeder] interactive_pick_extra_norm <- '0'
+
+--- Architecture ---
+  1. pie_convlstm * — PIE paper: ConvLSTM on VGG + single LSTM on bbox/decoder
+  2. bbox_only — BBox-only baseline (zero visual features, LSTM on bbox)
+  3. pcpa — PCPA-style: visual branch + bbox LSTM + shared extras + attention
+  4. branchattn — Branch attention. Sub-menu: static_pool, temporal_concat, or core_plus_extras
+  5. branchattn_temporal — Same sub-menu as branchattn. Temporal attention is only inside extra branches of core_plus_extras
+  6. encoder_extras — Extras tiled into ConvLSTM channels (feature_target=encoder)
+  7. both — Extras in both ConvLSTM channels and decoder LSTM
+  8. temporal_encoders — PIE decoder + selectable temporal visual encoder (ConvLSTM2D / Transformer / S4 / S4D / Mamba)
+[feeder] interactive_pick_architecture <- '1'
+[config] ARCHITECTURE  = pie_convlstm
+[config] FUSION        = pie
+[config] FEATURE_TARGET= decoder
+[config] ZERO_VISUAL   = False
+[config] EXTRA_NORM    = none
+[config] FEATURE_NORM  = {}
+[config] TEMPORAL_ENCODER = None
+[config] TEMPORAL_HP      = {}
+[config] USE_TTE  = False
+[config] FLOW_FEATURES   = []
+
+[run_name] existing run folders under:
+  D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm
+  [0] PIE1_Dec_bbox_context_randomSplit
+  [1] PIE1_Dec_bbox_context_randomSplit_run2
+  [2] PIE1_Dec_bbox_context_randomSplit_run3
+  [3] PIE1_Dec_bbox_context_defaultSplit
+  [4] PIE1_Dec_bbox_context_randomSplit_run4
+  [5] PIE1_Dec_bbox_context_randomSplit_run5
+  [6] PIE1_Dec_bbox_context_randomSplit_run6
+  [7] patience5_PIE1_Dec_bbox_context_randomSplit
+  [8] normbbox_PIE1_Dec_bbox_context_randomSplit
+  [9] bboxOnly_NoVis_PIE1_Dec_bbox_randomSplit
+  [10] bbox_only_NoVis_PIE1_Dec_bbox_randomSplit
+  [11] bboxOnly_NoVis_PIE1_Dec_bbox_randomSplit_run2
+  [12] bbb_NoVis_PIE1_Dec_bbox_randomSplit
+  [13] PIE1_Dec_bbox_context_randomSplit_run7
+  [14] 3_PIE1_Dec_bbox_context_defaultSplit
+  [15] 3_PIE1_Dec_bbox_context_defaultSplit_run2
+  [16] visonly_ZeroBbox_PIE1_Dec_bbox_context_randomSplit
+  [17] visonly_ZeroBbox_PIE1_Dec_bbox_context_randomSplit_run2
+  [18] visonly_ZeroBbox_PIE1_Dec_bbox_context_randomSplit_run3
+  [19] grid_full_raw_default_s42_PIE1_Dec_bbox_context_defaultSplit
+  [20] grid_full_norm_default_s42_PIE1_Dec_bbox_context_defaultSplit
+  [21] grid_full_norm_default_s42_PIE1_Dec_bbox_context_defaultSplit_run2
+  [22] grid_vis_only_default_s42_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit
+  [23] grid_bbox_raw_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit
+  [24] grid_bbox_norm_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit
+  [25] grid_full_raw_random_s42_PIE1_Dec_bbox_context_randomSplit
+  [26] grid_full_norm_random_s42_PIE1_Dec_bbox_context_randomSplit
+  [27] grid_vis_only_random_s42_ZeroBbox_PIE1_Dec_bbox_context_randomSplit
+  [28] grid_bbox_raw_random_s42_NoVis_PIE1_Dec_bbox_randomSplit
+  [29] grid_bbox_norm_random_s42_NoVis_PIE1_Dec_bbox_randomSplit
+  [30] grid_full_raw_default_s42_PIE1_Dec_bbox_context_defaultSplit_run2
+  [31] grid_full_norm_default_s42_PIE1_Dec_bbox_context_defaultSplit_run3
+  [32] grid_vis_only_default_s42_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit_run2
+  [33] grid_bbox_raw_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit_run2
+  [34] grid_bbox_norm_default_s42_NoVis_PIE1_Dec_bbox_defaultSplit_run2
+  [35] grid_full_raw_random_s42_PIE1_Dec_bbox_context_randomSplit_run2
+  [36] grid_full_norm_random_s42_PIE1_Dec_bbox_context_randomSplit_run2
+  [37] grid_vis_only_random_s42_ZeroBbox_PIE1_Dec_bbox_context_randomSplit_run2
+  [38] grid_bbox_raw_random_s42_NoVis_PIE1_Dec_bbox_randomSplit_run2
+  [39] grid_bbox_norm_random_s42_NoVis_PIE1_Dec_bbox_randomSplit_run2
+  [40] grid_full_raw_vnorm_default_s42_VNorm_PIE1_Dec_bbox_context_defaultSplit
+  [41] grid_full_norm_vnorm_default_s42_VNorm_PIE1_Dec_bbox_context_defaultSplit
+  [42] grid_vis_only_vnorm_default_s42_VNorm_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit
+  [43] A__VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [44] A__VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [45] A_normbbox_VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [46] bce_focal_VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [47] A_bce_focal_valloss_VNorm_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [48] 30Len_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [49] 30frams_base_Cap_E8_log1p_PIE1_Dec_bbox_context_randomSplit
+  [50] seed1_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [51] BASE_seed1_Cap_log1p_PIE1_Dec_bbox_context_randomSplit
+  [52] BASE_seed1_1_PIE1_Dec_bbox_context_randomSplit
+  [53] seed_1111_return_sequencesTrue_Cap_RS_PIE1_Dec_bbox_context_randomSplit
+  [54] vggNorm_VNorm_VNorm_PIE1_Dec_bbox_context_randomSplit
+  [55] A_normvis_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [56] Aonly_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [57] A_visNorm_PERCENTILEQ9_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [58] he0faefcd_s1_VNorm_Cap_E8_PIE1_Dec_bbox_context_randomSplit
+  [59] Base_PIE1_Dec_bbox_context_defaultSplit
+  [60] Cap_RS_PIE1_Dec_bbox_context_defaultSplit
+  [61] he0faefcd_s1_VNorm_Cap_E8_PIE1_Dec_bbox_context_defaultSplit
+  [62] h17fd023a_s1_VNorm_Cap_E8_PIE1_Dec_bbox_context_pose_defaultSplit
+  [63] h0c60ebe3_s1_PIE1_Dec_bbox_context_defaultSplit
+  [64] hbb9933dd_s1_NoVis_PIE1_Dec_bbox_defaultSplit
+  [65] hee028816_s1_ZeroBbox_PIE1_Dec_bbox_context_defaultSplit
+  [66] h09b71c73_s1_PIE1_Dec_bbox_context_defaultSplit
+  [67] hd65a0e5b_s1_VNorm_PIE1_Dec_bbox_context_defaultSplit
+  [68] h179441fd_s1_Cap_log1p_PIE1_Dec_bbox_context_defaultSplit
+  [69] h74460e50_s1_Cap_RS_PIE1_Dec_bbox_context_defaultSplit
+  [70] h2a428865_s1_Cap_E4_PIE1_Dec_bbox_context_defaultSplit
+  [71] hfedd20cd_s1_Cap_E8_PIE1_Dec_bbox_context_defaultSplit
+  [72] h49fb0563_s1_Cap_E16_PIE1_Dec_bbox_context_defaultSplit
+  [73] h500cd075_s1_Cap_E32_PIE1_Dec_bbox_context_defaultSplit
+  [74] h3a78490c_s1_Cap_I32_PIE1_Dec_bbox_context_defaultSplit
+[feeder] interactive_pick_new_run_name <- 'h46eea89c_s1'
+
+[config] ARCHITECTURE = pie_convlstm
+[config] RUN_NAME     = h46eea89c_s1_Cap_I64_PIE1_Dec_bbox_context_defaultSplit
+[seed] TF op determinism ENABLED
+Run dir      -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h46eea89c_s1_Cap_I64_PIE1_Dec_bbox_context_defaultSplit
+Console log  -> D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h46eea89c_s1_Cap_I64_PIE1_Dec_bbox_context_defaultSplit\logs\console_19Nov2026-13h27m13s.txt
+[choices] saved to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h46eea89c_s1_Cap_I64_PIE1_Dec_bbox_context_defaultSplit\choices.json
+
+--- architecture hyperparams ---
+hidden_units          -> 128
+convlstm_filters      -> 64
+convlstm_kernel       -> 2
+regularizer_val       -> 0.001
+lstm_dropout          -> 0.4
+lstm_rec_dropout      -> 0.2
+lstm_rec_activation   -> hard_sigmoid
+branch_mode           -> None
+aux_loss_weight       -> 0.0
+
+--- optimizer/training hyperparams ---
+lr                    -> 1e-05
+clip_type             -> none
+clip_amount           -> None
+weight_decay          -> 0.0
+batch_size            -> 64
+es_min_delta          -> 0.0001
+es_patience           -> 10
+use_plateau           -> True
+monitor_metric        -> val_loss (mode=min)
+loss                  -> binary_crossentropy
+
+--- data hyperparams ---
+data_split_type       -> default
+balance_mode          -> undersample_base_article
+val_augment_mode      -> None
+normalize_decoder_bbox-> False
+pose_scale            -> bbox_relative
+feature_target        -> decoder
+fusion                -> pie
+extra_norm            -> none
+feature_norm          -> {}
+zero_visual           -> False
+[summary] written to D:\PIE codes\PIE_dataset\experiments\tensorflow\pie_convlstm\h46eea89c_s1_Cap_I64_PIE1_Dec_bbox_context_defaultSplit\run_summary.txt
+
+GPUs visible to TF: [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+Running with GPU enabled.
+[config] temporal_encoder = None
+[config] model.normalize_decoder_bbox = False
+[config] branch_mode=None temporal_fusion=pie_concat
+[config] routing fusion=pie target=decoder extra_norm=none pose_scale=bbox_relative zero_visual=False use_visual=True
+PIEIntentExperiment(framework='tensorflow', architecture='pie_convlstm', run_name='h46eea89c_s1_Cap_I64_PIE1_Dec_bbox_context_defaultSplit', run_dir='D:\\PIE codes\\PIE_dataset\\experiments\\tensorflow\\pie_convlstm\\h46eea89c_s1_Cap_I64_PIE1_Dec_bbox_context_defaultSplit')
+Epochs for this run -> 400
+
+>>> Training
+    Runs model.fit() with early stopping and checkpointing on the chosen monitor metric. Per-epoch train/val/test metrics printed below use the SAME overlap as the training windows -- these differ from the final evaluation numbers below, which use overlap=1 unless an overlap=0.5 pass is requested.
+min_track_size = 0
+seq_overlap_rate = 0.5
+[config] feature spans: [('bbox', 0, 4)]
+[config] decoder input width = 4 from ['bbox']
+[config] feature spans: [('bbox', 0, 4)]
+[config] decoder input width = 4 from ['bbox']
+feature_shape from context_model: (7, 7, 512)
+[features] reusing stacked cache D:\PIE codes\PIE_dataset/data/data\pie\train\features_context_pad_resize\vgg16_none_prep1_stacked_train_5164_15_ebacd2459991_7x7x512.dat
+[features] reusing stacked cache D:\PIE codes\PIE_dataset/data/data\pie\val\features_context_pad_resize\vgg16_none_prep1_stacked_val_1376_15_a7b52ecf3f3c_7x7x512.dat
+[seed] global seed = 1 (weights/dropout/shuffle)
+[config] fusion=pie feature_target=decoder decoder_width=4 extra_width=0
+[visual_pipeline] graph order: VGG -> (raw) -> ConvLSTM
+Model: "model"
+__________________________________________________________________________________________________
+ Layer (type)                   Output Shape         Param #     Connected to                     
+==================================================================================================
+ encoder_input (InputLayer)     [(None, 15, 7, 7, 5  0           []                               
+                                12)]                                                              
+                                                                                                  
+ input_reduce (TimeDistributed)  (None, 15, 7, 7, 64  32832      ['encoder_input[0][0]']          
+                                )                                                                 
+                                                                                                  
+ conv_lstm2d (ConvLSTM2D)       (None, 6, 6, 64)     131328      ['input_reduce[0][0]']           
+                                                                                                  
+ encoder_flatten (Flatten)      (None, 2304)         0           ['conv_lstm2d[0][0]']            
+                                                                                                  
+ repeat_vector (RepeatVector)   (None, 15, 2304)     0           ['encoder_flatten[0][0]']        
+                                                                                                  
+ decoder_input (InputLayer)     [(None, 15, 4)]      0           []                               
+                                                                                                  
+ concatenate (Concatenate)      (None, 15, 2308)     0           ['repeat_vector[0][0]',          
+                                                                  'decoder_input[0][0]']          
+                                                                                                  
+ decoder_network (LSTM)         (None, 128)          1247744     ['concatenate[0][0]']            
+                                                                                                  
+ decoder_dense (Dense)          (None, 1)            129         ['decoder_network[0][0]']        
+                                                                                                  
+==================================================================================================
+Total params: 1,412,033
+Trainable params: 1,412,033
+Non-trainable params: 0
+__________________________________________________________________________________________________
