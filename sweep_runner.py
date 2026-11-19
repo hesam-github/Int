@@ -1,9 +1,9 @@
-# sweep_runner.py (v6) -- ablation on paper-style inputs only: decoder bbox + VGG16 context (ConvLSTM encoder).
+# sweep_runner.py (v6, priority stages) -- ablation on paper-style inputs only: decoder bbox + VGG16 context (ConvLSTM encoder).
 # No pose / semantic segmentation / optical flow is selected, loaded or processed.
 # Usage (run from the project folder, next to train_pipeline.py):
-#   python sweep_runner.py --stage isolated --seeds 1,2,3 --dry-run
-#   python sweep_runner.py --stage isolated --seeds 1,2,3
-#   python sweep_runner.py --stage visual --seeds 1,2,3 --max-hours 72
+#   python sweep_runner.py --stage priority --seeds 1 --dry-run
+#   python sweep_runner.py --stage priority --seeds 1 --max-hours 30
+#   python sweep_runner.py --stage priority2 --pipeline C --seeds 1 --max-hours 20
 #   python sweep_runner.py --aggregate
 import argparse, builtins, hashlib, itertools, json, os, random, re, statistics, subprocess, sys, time, traceback
 from pathlib import Path
@@ -145,6 +145,20 @@ def capacity_grid(pipeline='A'):
     vn, lg = PIPELINE[pipeline]
     for cap, rs in itertools.product(ALL_CAPS, 'ny'):
         yield mk(visual_norm=vn, log1p=lg, percentile='n', capacity=cap, rs=rs)
+
+def priority_grid():
+    """Tier 1: five normalization pipelines + two input controls, at baseline capacity."""
+    for vn, lg, pc in [('n', 'n', 'n'), ('y', 'n', 'n'), ('y', 'y', 'n'), ('n', 'y', 'n'), ('n', 'n', 'y')]:
+        yield mk(visual_norm=vn, log1p=lg, percentile=pc)
+    yield mk(use_visual='n', **NOVIS)
+    yield mk(bbox_mode='1')
+
+def priority2_grid(pipeline='A'):
+    """Tier 2 under one visual pipeline: capacity presets 1-4 and return_sequences."""
+    vn, lg = PIPELINE[pipeline]
+    for cap in ('1', '2', '3', '4'):
+        yield mk(visual_norm=vn, log1p=lg, capacity=cap)
+    yield mk(visual_norm=vn, log1p=lg, rs='y')
 
 def cfg_id(c):
     # The constant 'ox' prefix is kept so run folders from earlier sweeps are still recognised (resume).
@@ -352,6 +366,8 @@ STAGE_ORDER = ['isolated', 'visual', 'capacity', 'logical']     # what '--stage 
 
 def grid_for(stage, pipeline, with_custom):
     return {'isolated': isolated_grid, 'visual': visual_grid,
+            'priority': priority_grid,
+            'priority2': lambda: priority2_grid(pipeline),
             'capacity': lambda: capacity_grid(pipeline),
             'logical': lambda: logical_grid(with_custom),
             'full': lambda: full_grid(with_custom)}[stage]()
@@ -449,10 +465,11 @@ def driver(a):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--one'); ap.add_argument('--aggregate', action='store_true')
-    ap.add_argument('--stage', choices=['all', 'isolated', 'visual', 'capacity', 'logical', 'full'], default='isolated')
-    ap.add_argument('--seeds', default='1,2,3'); ap.add_argument('--limit', type=int)
+    ap.add_argument('--stage', choices=['all', 'isolated', 'visual', 'capacity', 'logical', 'full',
+                                        'priority', 'priority2'], default='isolated')
+    ap.add_argument('--seeds', default='1'); ap.add_argument('--limit', type=int)
     ap.add_argument('--with-custom', action='store_true', help='logical/full: add the 55 custom capacities')
-    ap.add_argument('--pipeline', choices=list(PIPELINE), default='A', help='capacity stage: visual pipeline A/B/C/D')
+    ap.add_argument('--pipeline', choices=list(PIPELINE), default='A', help='capacity/priority2 stage: visual pipeline A/B/C/D')
     ap.add_argument('--sample', type=int, help='random subset of N configs (logical/full block only with --stage all)')
     ap.add_argument('--sample-seed', type=int, default=0)
     ap.add_argument('--max-hours', type=float, help='do not START a new run after this many hours')
