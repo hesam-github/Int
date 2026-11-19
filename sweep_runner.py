@@ -18,7 +18,7 @@ HP = dict(
     hidden_units=128, reg=0.001, lstm_dropout=0.4, lstm_recurrent_dropout=0.2,
     convlstm_filters=64, convlstm_kernel=2,
     es_min_delta=1e-4, es_patience=10,
-    plateau_patience=5, plateau_factor=0.5, plateau_min_lr=1e-7, plateau_min_delta=1e-3,
+    plateau_patience=3, plateau_factor=0.5, plateau_min_lr=1e-7, plateau_min_delta=1e-3,
     n_epochs=400, seed=1, data_seed=42, split_seed=42, deterministic_ops=True,
     attach_pose=False, log_mode='clean', threshold_space='raw', decision_threshold=0.5,
 )
