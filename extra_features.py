@@ -85,79 +85,6 @@ def _angle(a, b, c):
     cos = np.clip(np.dot(ba, bc) / (nba * nbc), -1.0, 1.0)
     return float(np.degrees(np.arccos(cos)))
 
-def attach_pose_dynamics(beh_seq, pose_dir, key='pose_dyn', min_conf=0.3, verbose=True):
-    """Compact dynamic pose features (recommended over raw 51-d).
-
-    Per frame (16-d):
-      - 8 velocities of key joints (l/r ankle, knee, hip, shoulder)  [8]
-      - 4 angles: l_knee, r_knee, l_hip, r_hip                       [4]
-      - 2 shoulder width / height ratios                             [2]
-      - 2 head orientation proxy (nose relative to shoulder midpoint) [2]
-    First frame velocities = 0. Missing keypoints -> 0.
-    """
-    out = []
-    missing_tracks = 0
-    for i, paths in enumerate(beh_seq['image']):
-        pid = beh_seq['ped_id'][i][0][0]
-        sid, vid, _ = _parse_frame_path(paths[0])
-        f = os.path.join(pose_dir, sid, vid, f'{pid}.npz')
-        track = []
-        if not os.path.isfile(f):
-            missing_tracks += 1
-            out.append([[0.0]*16 for _ in paths])
-            continue
-        z = np.load(f)
-        row_of = {int(fr): r for r, fr in enumerate(z['frames'])}
-        kpts = z['kpts']  # (T,17,3)
-        prev_xy = None
-        for j, p in enumerate(paths):
-            x1, y1, x2, y2 = beh_seq['bbox'][i][j]
-            w, h = max(x2-x1, 1.0), max(y2-y1, 1.0)
-            r = row_of.get(_parse_frame_path(p)[2])
-            vec = np.zeros(16, np.float32)
-            if r is not None:
-                k = kpts[r].copy()
-                ok = k[:, 2] >= min_conf
-                # relative xy
-                rel = np.zeros((17, 2), np.float32)
-                rel[ok, 0] = (k[ok, 0] - x1) / w
-                rel[ok, 1] = (k[ok, 1] - y1) / h
-                # velocities of 8 key joints
-                key_idx = [KP['l_ank'], KP['r_ank'], KP['l_kne'], KP['r_kne'],
-                           KP['l_hip'], KP['r_hip'], KP['l_sho'], KP['r_sho']]
-                if prev_xy is not None:
-                    for ii, ki in enumerate(key_idx):
-                        if ok[ki]:
-                            vec[ii] = np.linalg.norm(rel[ki] - prev_xy[ki])
-                prev_xy = rel.copy()
-                # angles
-                def get(kp):
-                    return rel[KP[kp]] if ok[KP[kp]] else None
-                la, lk, lh = get('l_ank'), get('l_kne'), get('l_hip')
-                ra, rk, rh = get('r_ank'), get('r_kne'), get('r_hip')
-                if la is not None and lk is not None and lh is not None:
-                    vec[8] = _angle(la, lk, lh) / 180.0
-                if ra is not None and rk is not None and rh is not None:
-                    vec[9] = _angle(ra, rk, rh) / 180.0
-                if lk is not None and lh is not None and get('l_sho') is not None:
-                    vec[10] = _angle(lk, lh, get('l_sho')) / 180.0
-                if rk is not None and rh is not None and get('r_sho') is not None:
-                    vec[11] = _angle(rk, rh, get('r_sho')) / 180.0
-                # shoulder width / height
-                if ok[KP['l_sho']] and ok[KP['r_sho']]:
-                    vec[12] = np.linalg.norm(rel[KP['l_sho']] - rel[KP['r_sho']])
-                if ok[KP['l_hip']] and ok[KP['r_hip']]:
-                    vec[13] = np.linalg.norm(rel[KP['l_hip']] - rel[KP['r_hip']])
-                # head orientation proxy
-                if ok[KP['nose']] and ok[KP['l_sho']] and ok[KP['r_sho']]:
-                    mid_sho = 0.5 * (rel[KP['l_sho']] + rel[KP['r_sho']])
-                    vec[14:16] = rel[KP['nose']] - mid_sho
-            track.append(vec.tolist())
-        out.append(track)
-    beh_seq[key] = out
-    if verbose:
-        print(f'[pose_dyn] attached 16-d dynamics; tracks without file: {missing_tracks}/{len(out)}')
-    return beh_seq
 
 # Cityscapes trainId groups -> 6 scene classes
 _GROUPS = {'road': [0], 'sidewalk': [1], 'vehicle': [13, 14, 15, 16],
@@ -472,69 +399,7 @@ def attach_flow_relative(beh_seq, verbose=True):
         print('[flow_relative] attached flow_rel_ped_crop and flow_rel_bbox_crop')
     return beh_seq
 
-def attach_flow_residual_stats(beh_seq, flow_root, verbose=True):
-    """Residual flow features that better isolate pedestrian and moving-object motion.
 
-    Requires crop_full and ped_mask modes to have been extracted.
-    Produces:
-      flow_res_ped_crop : mean residual (ped - crop)  [2]
-      flow_res_mag      : magnitude of residual mean  [1]
-      flow_res_std      : std of residual inside ped mask [2]
-      flow_upper_mag    : mean magnitude in upper half of bbox (body) [1]
-      flow_lower_mag    : mean magnitude in lower half of bbox (legs) [1]
-    Total 7-d per frame. Zero when data missing.
-    """
-    import os
-    from pathlib import Path
-
-    def _load_flow_map(flow_root, mode, sid, vid, pid, frame):
-        p = Path(flow_root) / mode / sid / vid / pid / f"{frame:05d}.npz"
-        if not p.is_file():
-            return None
-        return np.load(p)['flow'].astype(np.float32)
-
-    out_keys = ['flow_res_ped_crop', 'flow_res_mag', 'flow_res_std',
-                'flow_upper_mag', 'flow_lower_mag']
-    for k in out_keys:
-        beh_seq[k] = []
-
-    n_tracks = len(beh_seq['image'])
-    missing = 0
-    for i, paths in enumerate(beh_seq['image']):
-        pid = beh_seq['ped_id'][i][0][0]
-        sid, vid, _ = _parse_frame_path(paths[0])
-        track = {k: [] for k in out_keys}
-        for p in paths:
-            fr = _parse_frame_path(p)[2]
-            flow_crop = _load_flow_map(flow_root, 'crop_full', sid, vid, pid, fr)
-            flow_ped = _load_flow_map(flow_root, 'ped_mask', sid, vid, pid, fr)
-            if flow_crop is None or flow_ped is None:
-                missing += 1
-                for k in out_keys:
-                    track[k].append([0.0] * (2 if 'std' in k or 'ped_crop' in k else 1))
-                continue
-            # residual map
-            res = flow_ped - flow_crop
-            # mean residual
-            res_mean = res.mean(axis=(0, 1))
-            mag = float(np.linalg.norm(res_mean))
-            res_std = res.std(axis=(0, 1))
-            # upper / lower half of the crop (approximate legs vs body)
-            h = res.shape[0]
-            upper = res[:h//2]
-            lower = res[h//2:]
-            upper_mag = float(np.linalg.norm(upper.mean(axis=(0, 1))))
-            lower_mag = float(np.linalg.norm(lower.mean(axis=(0, 1))))
-            track['flow_res_ped_crop'].append(res_mean.tolist())
-            track['flow_res_mag'].append([mag])
-            track['flow_res_std'].append(res_std.tolist())
-            track['flow_upper_mag'].append([upper_mag])
-            track['flow_lower_mag'].append([lower_mag])
-        for k in out_keys:
-            beh_seq[k].append(track[k])
-    if verbose:
-        print(f'[flow_residual] attached {out_keys}; missing frames ~{missing}')
-    return beh_seq
 
 def attach_tte(beh_seq, key='tte', verbose=True):
     """Frames remaining until the track's last frame (the critical point).
@@ -548,4 +413,172 @@ def attach_tte(beh_seq, key='tte', verbose=True):
     beh_seq[key] = out
     if verbose:
         print(f'[tte] {key}: {len(out)} tracks (ablation only)')
+    return beh_seq
+
+_POSE_KEY_JOINTS = ('l_ank', 'r_ank', 'l_kne', 'r_kne', 'l_hip', 'r_hip', 'l_sho', 'r_sho')
+_POSE_ANGLES = ((8, 'l_ank', 'l_kne', 'l_hip'), (9, 'r_ank', 'r_kne', 'r_hip'),
+                (10, 'l_kne', 'l_hip', 'l_sho'), (11, 'r_kne', 'r_hip', 'r_sho'))
+
+
+def attach_pose_dynamics(beh_seq, pose_dir, key='pose_dyn', min_conf=0.3,
+                         min_bbox_height=0, verbose=True):
+    """16-d per frame, coordinates = (xy - bbox centre) / bbox height (isotropic, angles are true).
+    [0:8] joint speed (ankle, knee, hip, shoulder; L,R): only if the joint is valid in this AND the
+    previous consecutive frame. [8:12] knee L/R, hip L/R angle / 180. [12:14] shoulder, hip width.
+    [14:16] nose - shoulder midpoint. 0 = missing. Call BEFORE balancing; invalid for augmented copies."""
+    key_idx = [KP[n] for n in _POSE_KEY_JOINTS]
+    out, missing_tracks, empty, total = [], 0, 0, 0
+    for i, paths in enumerate(beh_seq['image']):
+        pid = beh_seq['ped_id'][i][0][0]
+        assert '__aug' not in pid, 'attach_pose_dynamics must run before augmentation'
+        sid, vid, _ = _parse_frame_path(paths[0])
+        f = os.path.join(pose_dir, sid, vid, f'{pid}.npz')
+        total += len(paths)
+        if not os.path.isfile(f):
+            missing_tracks += 1
+            empty += len(paths)
+            out.append([[0.0] * 16 for _ in paths])
+            continue
+        with np.load(f) as z:
+            row_of = {int(fr): r for r, fr in enumerate(z['frames'])}
+            kpts = z['kpts']
+        track, prev, prev_fr = [], None, None
+        for j, p in enumerate(paths):
+            fr = _parse_frame_path(p)[2]
+            x1, y1, x2, y2 = beh_seq['bbox'][i][j]
+            h = max(y2 - y1, 1.0)
+            vec = np.zeros(16, np.float32)
+            r = row_of.get(fr)
+            if r is None or (min_bbox_height > 0 and h < min_bbox_height):
+                prev, prev_fr = None, None
+                empty += 1
+                track.append(vec.tolist())
+                continue
+            k = kpts[r]
+            ok = k[:, 2] >= min_conf
+            rel = (k[:, :2] - np.array([(x1 + x2) / 2.0, (y1 + y2) / 2.0])) / h
+            if not ok.any():
+                empty += 1
+            if prev is not None and fr - prev_fr == 1:
+                p_rel, p_ok = prev
+                for slot, ki in enumerate(key_idx):
+                    if ok[ki] and p_ok[ki]:
+                        vec[slot] = np.linalg.norm(rel[ki] - p_rel[ki])
+            prev, prev_fr = (rel, ok), fr
+
+            def get(name):
+                return rel[KP[name]] if ok[KP[name]] else None
+
+            for slot, a, b, cc in _POSE_ANGLES:
+                pa, pb, pc = get(a), get(b), get(cc)
+                if pa is not None and pb is not None and pc is not None:
+                    vec[slot] = _angle(pa, pb, pc) / 180.0
+            if ok[KP['l_sho']] and ok[KP['r_sho']]:
+                vec[12] = np.linalg.norm(rel[KP['l_sho']] - rel[KP['r_sho']])
+            if ok[KP['l_hip']] and ok[KP['r_hip']]:
+                vec[13] = np.linalg.norm(rel[KP['l_hip']] - rel[KP['r_hip']])
+            if ok[KP['nose']] and ok[KP['l_sho']] and ok[KP['r_sho']]:
+                vec[14:16] = rel[KP['nose']] - 0.5 * (rel[KP['l_sho']] + rel[KP['r_sho']])
+            track.append(vec.tolist())
+        out.append(track)
+    beh_seq[key] = out
+    if verbose:
+        print(f'[pose_dyn] tracks without file: {missing_tracks}/{len(out)}; '
+              f'frames with no usable keypoint: {empty}/{total} ({100 * empty / max(total, 1):.1f}%)')
+    return beh_seq
+
+
+_RES_DIM = 7
+_RES_MIN_PIXELS = 20
+
+
+def _res_vector(ped, crop):
+    """ped, crop: (H, W, 2) float32 from ped_mask / crop_full. Returns ((7,) float32, inconsistent flag).
+    [0:2] mean ped flow - mean flow of the NON-person pixels of the crop; [2:4] std of flow inside the person;
+    [4] |upper-body mean - background|, [5] |lower-body mean - background| (split at the mask's own mid row);
+    [6] valid flag (person mask has enough pixels)."""
+    vec = np.zeros(_RES_DIM, np.float32)
+    mask = np.any(ped != 0, axis=-1)
+    if int(mask.sum()) < _RES_MIN_PIXELS:
+        return vec, False
+    bad = bool(np.abs(ped[mask] - crop[mask]).max() > 0.05)
+    bg = crop[~mask].mean(axis=0) if (~mask).any() else crop.reshape(-1, 2).mean(axis=0)
+    vec[0:2] = ped[mask].mean(axis=0) - bg
+    vec[2:4] = ped[mask].std(axis=0)
+    ys = np.nonzero(mask)[0]
+    mid = 0.5 * (ys.min() + ys.max())
+    rows = np.arange(mask.shape[0])[:, None]
+    for slot, part in ((4, mask & (rows < mid)), (5, mask & (rows >= mid))):
+        if part.any():
+            vec[slot] = np.linalg.norm(ped[part].mean(axis=0) - bg)
+    vec[6] = 1.0
+    return vec, bad
+
+
+def _res_track_vectors(flow_root, sid, vid, pid):
+    """{frame: ((7,) vec, bad)} for one track, or None. Reduced once to <flow_root>/summary/res_v1/...
+    If extraction was incomplete when a summary was built, delete <flow_root>/summary/res_v1."""
+    summary = os.path.join(flow_root, 'summary', 'res_v1', sid, vid, f'{pid}.npz')
+    if os.path.isfile(summary):
+        with np.load(summary) as z:
+            return {int(fr): (z['vec'][r], bool(z['bad'][r])) for r, fr in enumerate(z['frames'])}
+    ped_dir = os.path.join(flow_root, 'ped_mask', sid, vid, pid)
+    crop_dir = os.path.join(flow_root, 'crop_full', sid, vid, pid)
+    if not (os.path.isdir(ped_dir) and os.path.isdir(crop_dir)):
+        return None
+    frames, vecs, bads = [], [], []
+    for name in sorted(os.listdir(ped_dir)):
+        crop_file = os.path.join(crop_dir, name)
+        if not name.endswith('.npz') or name.endswith('.tmp.npz') or not os.path.isfile(crop_file):
+            continue
+        with np.load(os.path.join(ped_dir, name)) as z:
+            ped = z['flow'].astype(np.float32)
+        with np.load(crop_file) as z:
+            crop = z['flow'].astype(np.float32)
+        if ped.shape != crop.shape:
+            continue
+        vec, bad = _res_vector(ped, crop)
+        frames.append(int(name[:-len('.npz')]))
+        vecs.append(vec)
+        bads.append(bad)
+    if not frames:
+        return None
+    _atomic_save(summary, frames=np.array(frames), vec=np.stack(vecs), bad=np.array(bads))
+    return dict(zip(frames, zip(vecs, bads)))
+
+
+def attach_flow_residual_stats(beh_seq, flow_root, key='flow_res', verbose=True):
+    """Adds ONE 7-d key (see _res_vector). Needs flow_root/crop_full and flow_root/ped_mask.
+    Zero vector with valid flag 0 = missing file, first frame of a track, or empty person mask.
+    Not valid for augmented copies. Contains camera ego-motion cues: leakage-prone configuration."""
+    for sub in ('crop_full', 'ped_mask'):
+        if not os.path.isdir(os.path.join(flow_root, sub)):
+            print(f'[flow_res] {sub} folder missing, {key} not attached')
+            return beh_seq
+    out, missing_tracks, zero_frames, bad_frames, total = [], 0, 0, 0, 0
+    for i, paths in enumerate(beh_seq['image']):
+        pid = beh_seq['ped_id'][i][0][0]
+        assert '__aug' not in pid, 'attach_flow_residual_stats does not support augmentation copies'
+        sid, vid, _ = _parse_frame_path(paths[0])
+        vectors = _res_track_vectors(flow_root, sid, vid, pid)
+        if vectors is None:
+            missing_tracks += 1
+        track = []
+        for p in paths:
+            total += 1
+            item = None if vectors is None else vectors.get(_parse_frame_path(p)[2])
+            if item is None:
+                vec = np.zeros(_RES_DIM, np.float32)
+                zero_frames += 1
+            else:
+                vec, bad = item
+                zero_frames += int(vec[6] == 0)
+                bad_frames += int(bad)
+            track.append(vec.tolist())
+        out.append(track)
+    beh_seq[key] = out
+    if verbose:
+        print(f'[flow_res] tracks without data {missing_tracks}/{len(out)}; '
+              f'invalid frames {zero_frames}/{total} ({100 * zero_frames / max(total, 1):.1f}%); '
+              f'ped vs crop disagree on {bad_frames} frames (should be 0)')
     return beh_seq

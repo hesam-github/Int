@@ -263,10 +263,13 @@ def prepare_data(opts, data_opts, pie_path):
     # Offline features: only read from disk when selected in the first menu.
     if 'pose' in offline:
         _require_dir(pose_dir, 'pose')
-        from extra_features import attach_pose
+        from extra_features import attach_pose, attach_pose_dynamics
         for split in (train, val, test):
             attach_pose(split, pose_dir, scale=opts.get('pose_scale', 'bbox_relative'),
                         min_bbox_height=opts.get('pose_min_height', 0))
+            attach_pose_dynamics(split, pose_dir,
+                                 min_bbox_height=opts.get('pose_min_height', 0),
+                                 verbose=(split is train))
 
     if 'scene' in offline:
         _require_dir(scene_dir, 'scene')
@@ -290,6 +293,9 @@ def prepare_data(opts, data_opts, pie_path):
         print("[warning] augmentation mode: pose/scene of synthetic copies are only re-indexed, "
               "not mirrored/jittered together with the bbox -- do not interpret pose/scene "
               "results obtained in this mode.")
+        for split in (train, val, test):
+            split.pop('pose_dyn', None)
+        print("[warning] pose_dyn removed: invalid for augmented copies.")
 
     # velocity is computed from bbox only (no disk reads), so it is always attached
     from extra_features import attach_velocity, attach_tte, attach_flow,attach_flow_relative
@@ -306,10 +312,12 @@ def prepare_data(opts, data_opts, pie_path):
               "no flow_* feature will appear in the menu.")
     else:
         _require_dir(flow_dir, 'flow')
-        from extra_features import attach_flow, attach_flow_relative
+        from extra_features import (attach_flow, attach_flow_relative,
+                                    attach_flow_residual_stats)
         for split in (train, val, test):
             attach_flow(split, flow_dir, verbose=(split is train))
             attach_flow_relative(split, verbose=(split is train))
+            attach_flow_residual_stats(split, flow_dir, verbose=(split is train))
 
     print_phase(PHASE_LOSS_FINALIZE)
     from focal_loss import bce_plus_focal_loss
@@ -410,31 +418,31 @@ def choose_run_identity(opts, data, hp, pie_path):
               "decoder input. For a PARALLEL bbox branch choose branchattn or branchattn_temporal.")
 
     # Temporal encoder menu (only for temporal_encoders architecture)
-    if arch_cfg.get('use_temporal_menu', False):
-        from temporal_encoders import choose_temporal_for_menu
-        choose_temporal_for_menu(opts)
-    else:
-        opts['temporal_encoder'] = None
-        opts['temporal_hp'] = {}
+    # if arch_cfg.get('use_temporal_menu', False):
+    #     from temporal_encoders import choose_temporal_for_menu
+    #     choose_temporal_for_menu(opts)
+    # else:
+    #     opts['temporal_encoder'] = None
+    #     opts['temporal_hp'] = {}
 
     # Interactive fusion mode when offline features are present
-    has_offline = any(f not in ('bbox',) for f in decoder_features)
-    if arch_name in ('temporal_encoders', 'branchattn', 'branchattn_temporal', 'pcpa') and has_offline:
-        opts['fusion_mode'] = interactive_pick_fusion_mode(has_offline)
-        print(f"[config] FUSION_MODE = {opts['fusion_mode']}")
-    else:
-        opts['fusion_mode'] = 'pie_concat'
+    # has_offline = any(f not in ('bbox',) for f in decoder_features)
+    # if arch_name in ('temporal_encoders', 'branchattn', 'branchattn_temporal', 'pcpa') and has_offline:
+    #     opts['fusion_mode'] = interactive_pick_fusion_mode(has_offline)
+    #     print(f"[config] FUSION_MODE = {opts['fusion_mode']}")
+    # else:
+    #     opts['fusion_mode'] = 'pie_concat'
 
     # Auxiliary loss (only meaningful for multi-branch modes)
-    opts['aux_loss_weight'] = 0.0
-    multi_branch = (
-        (arch_name in ('branchattn', 'branchattn_temporal')
-         and opts.get('branch_mode') in ('static_pool', 'core_plus_extras'))
-        or opts.get('fusion_mode') == 'core_plus_extras'
-    )
-    if multi_branch:
-        opts['aux_loss_weight'] = interactive_pick_aux_loss()
-        print(f"[config] AUX_LOSS_WEIGHT = {opts['aux_loss_weight']}")
+    # opts['aux_loss_weight'] = 0.0
+    # multi_branch = (
+    #     (arch_name in ('branchattn', 'branchattn_temporal')
+    #      and opts.get('branch_mode') in ('static_pool', 'core_plus_extras'))
+    #     or opts.get('fusion_mode') == 'core_plus_extras'
+    # )
+    # if multi_branch:
+    #     opts['aux_loss_weight'] = interactive_pick_aux_loss()
+    #     print(f"[config] AUX_LOSS_WEIGHT = {opts['aux_loss_weight']}")
 
     print(f"[config] TEMPORAL_ENCODER = {opts.get('temporal_encoder')}")
     print(f"[config] TEMPORAL_HP      = {opts.get('temporal_hp')}")
