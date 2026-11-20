@@ -20,6 +20,8 @@ import os
 import pickle
 import sys
 import time
+import hashlib
+import numpy as np
 
 from focal_loss import weighted_binary_crossentropy
 from log_mode import configure_tf_logging, is_full
@@ -239,6 +241,49 @@ def _require_dir(path, family):
             f"[offline] '{family}' was selected but this folder does not exist: {path}\n"
             f"Run its extractor, or answer the offline-features question without '{family}'.")
 
+OFFLINE_CACHE_VERSION = 'v2'   # bump when the logic in extra_features.py changes
+
+
+def _sequence_fingerprint(split):
+    h = hashlib.md5()
+    for pid, paths, boxes in zip(split['ped_id'], split['image'], split['bbox']):
+        h.update(str(pid[0][0]).encode())
+        h.update(str(len(paths)).encode())
+        h.update(str(paths[0]).encode())
+        h.update(str(paths[-1]).encode())
+        h.update(np.asarray(boxes, np.float32).tobytes())
+    return h.hexdigest()
+
+
+def attach_with_cache(family, splits, path, attach_fn):
+    """splits: {'train': .., 'val': .., 'test': ..}, fresh and un-balanced.
+    attach_fn(split, verbose) attaches features in place. Only the NEW keys are cached,
+    together with a fingerprint of the tracks they were computed for."""
+    fp = {n: _sequence_fingerprint(s) for n, s in splits.items()}
+    if os.path.isfile(path):
+        try:
+            with open(path, 'rb') as f:
+                cached = pickle.load(f)
+            if cached['fingerprint'] == fp:
+                for n, s in splits.items():
+                    s.update(cached['features'][n])
+                print(f"[offline] {family}: cache hit ({os.path.basename(path)})")
+                return
+            print(f"[offline] {family}: cache stale (tracks changed), rebuilding")
+        except Exception as e:
+            print(f"[offline] {family}: cache unreadable ({e!r}), rebuilding")
+    before = {n: set(s) for n, s in splits.items()}
+    for n, s in splits.items():
+        attach_fn(s, n == 'train')
+    features = {n: {k: v for k, v in s.items() if k not in before[n]} for n, s in splits.items()}
+    if not any(features[n] for n in features):
+        print(f"[offline] {family}: nothing was attached, cache not written")
+        return
+    tmp = path + '.tmp'
+    with open(tmp, 'wb') as f:
+        pickle.dump({'fingerprint': fp, 'features': features}, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+    print(f"[offline] {family}: saved cache ({os.path.basename(path)})")
 
 def prepare_data(opts, data_opts, pie_path):
     """Sequences, optional offline features, balancing, velocity, and the final loss object."""
@@ -260,23 +305,54 @@ def prepare_data(opts, data_opts, pie_path):
     print_annotated_pedestrian_fields(imdb)
     train, val, test = build_split_sequences(imdb, data_opts, carve_seed=opts['split_seed'])
 
-    # Offline features: only read from disk when selected in the first menu.
+
+    cache_dir = os.path.join(pie_path, 'data_cache', 'offline_features')
+    os.makedirs(cache_dir, exist_ok=True)
+    splits = {'train': train, 'val': val, 'test': test}
+    split_tag = hashlib.md5(json.dumps(
+        {'split_type': opts.get('split_type', 'default'),
+         'split_seed': opts.get('split_seed', 42),
+         'split_opts': opts.get('split_opts', {}),
+         'data': {k: data_opts.get(k) for k in ('seq_type', 'min_track_size', 'fstride',
+                                                'height_rng', 'squarify_ratio', 'subset')}},
+        sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+    def cache_path(name):
+        return os.path.join(cache_dir, f"{name}_{OFFLINE_CACHE_VERSION}_{split_tag}.pkl")
+
     if 'pose' in offline:
         _require_dir(pose_dir, 'pose')
         from extra_features import attach_pose, attach_pose_dynamics
-        for split in (train, val, test):
-            attach_pose(split, pose_dir, scale=opts.get('pose_scale', 'bbox_relative'),
-                        min_bbox_height=opts.get('pose_min_height', 0))
-            attach_pose_dynamics(split, pose_dir,
-                                 min_bbox_height=opts.get('pose_min_height', 0),
-                                 verbose=(split is train))
+        pose_scale = opts.get('pose_scale', 'bbox_relative')
+        pose_h = opts.get('pose_min_height', 0)
+
+        def attach_pose_family(split, verbose):
+            attach_pose(split, pose_dir, scale=pose_scale, min_bbox_height=pose_h, verbose=verbose)
+            attach_pose_dynamics(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
+
+        attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}"),
+                          attach_pose_family)
 
     if 'scene' in offline:
         _require_dir(scene_dir, 'scene')
         from extra_features import attach_scene, attach_scene_critical
-        for split in (train, val, test):
-            attach_scene(split, scene_dir)
-            attach_scene_critical(split, scene_dir)   # new targeted features
+
+        def attach_scene_family(split, verbose):
+            attach_scene(split, scene_dir, verbose=verbose)
+            attach_scene_critical(split, scene_dir, verbose=verbose)
+
+        attach_with_cache('scene', splits, cache_path('scene'), attach_scene_family)
+
+    if 'flow' in offline and opts['balance_mode'] != 'augmentation':
+        _require_dir(flow_dir, 'flow')
+        from extra_features import attach_flow, attach_flow_relative, attach_flow_residual_stats
+
+        def attach_flow_family(split, verbose):
+            attach_flow(split, flow_dir, verbose=verbose)
+            attach_flow_relative(split, verbose=verbose)
+            attach_flow_residual_stats(split, flow_dir, verbose=verbose)
+
+        attach_with_cache('flow', splits, cache_path('flow'), attach_flow_family)
 
     lens = [len(track) for track in train['image']]
     print(f"tracks={len(lens)}  min_len={min(lens)}  max_len={max(lens)}")
@@ -289,6 +365,14 @@ def prepare_data(opts, data_opts, pie_path):
         val_augment_mode=(opts['val_augment_mode'] or 'undersample_val'),
         data_seed=opts['data_seed'])
 
+    _feature_keys = ('pose', 'pose_dyn', 'scene', 'scene_critical', 'flow_bbox', 'flow_crop',
+                     'flow_ped', 'flow_rel_ped_crop', 'flow_rel_bbox_crop', 'flow_res')
+    for _name, _split in (('train', train), ('val', val)):
+        for _k in _feature_keys:
+            if _k in _split:
+                assert len(_split[_k]) == len(_split['image']), \
+                    f"{_name}: '{_k}' is misaligned with tracks after balancing"
+
     if opts['balance_mode'] == 'augmentation' and (offline & {'pose', 'scene'}):
         print("[warning] augmentation mode: pose/scene of synthetic copies are only re-indexed, "
               "not mirrored/jittered together with the bbox -- do not interpret pose/scene "
@@ -298,7 +382,7 @@ def prepare_data(opts, data_opts, pie_path):
         print("[warning] pose_dyn removed: invalid for augmented copies.")
 
     # velocity is computed from bbox only (no disk reads), so it is always attached
-    from extra_features import attach_velocity, attach_tte, attach_flow,attach_flow_relative
+    from extra_features import attach_velocity, attach_tte
     for split in (train, val, test):
         attach_velocity(split)
     if opts.get('use_tte'):
@@ -310,15 +394,6 @@ def prepare_data(opts, data_opts, pie_path):
     elif opts['balance_mode'] == 'augmentation':
         print("[warning] flow was selected but is SKIPPED in augmentation mode: "
               "no flow_* feature will appear in the menu.")
-    else:
-        _require_dir(flow_dir, 'flow')
-        from extra_features import (attach_flow, attach_flow_relative,
-                                    attach_flow_residual_stats)
-        for split in (train, val, test):
-            attach_flow(split, flow_dir, verbose=(split is train))
-            attach_flow_relative(split, verbose=(split is train))
-            attach_flow_residual_stats(split, flow_dir, verbose=(split is train))
-
     print_phase(PHASE_LOSS_FINALIZE)
     from focal_loss import bce_plus_focal_loss
 
