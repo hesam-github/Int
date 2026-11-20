@@ -492,6 +492,24 @@ def build_intention_model(intent):
     if aux_weight > 0:
         if (fusion in ('branchattn', 'branchattn_temporal') and attn_weights is not None
                 and len(branches) > 1 and len(branches) == len(intent.branch_names)):
+            # در feature_routing.py، داخل if aux_weight > 0 و قبل از ساخت heads:
+            allowed_aux = {'core_bbox_visual', 'scene_critical', 'pose_dyn'}  # فقط این‌ها
+            heads = []
+            kept_names = []
+            for name, branch in zip(intent.branch_names, branches):
+                if name not in allowed_aux:
+                    continue
+                heads.append(Dense(
+                    intent._decoder_dense_output_size, activation='sigmoid',
+                    kernel_regularizer=intent._kernel_regularizer,
+                    bias_regularizer=intent._bias_regularizer,
+                    name=f'aux_{name}')(branch))
+                kept_names.append(name)
+            intent.aux_head_names = [f'aux_{n}' for n in kept_names]
+            if heads:
+                intent.aux_train_model = Model(
+                    inputs=[maps_in, dec_in], outputs=[output] + heads, name='model_aux')
+                print(f"[config] aux heads (train only): {intent.aux_head_names}")
             heads = []
             for name, branch in zip(intent.branch_names, branches):
                 heads.append(Dense(
