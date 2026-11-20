@@ -69,6 +69,95 @@ def attach_pose(beh_seq, pose_dir, key='pose', min_conf=0.3, scale='bbox_relativ
               f'{masked_small}/{total} ({100 * masked_small / max(total, 1):.1f}%)')
     return beh_seq
 
+# COCO keypoint indices
+KP = {'nose':0, 'l_eye':1, 'r_eye':2, 'l_ear':3, 'r_ear':4,
+      'l_sho':5, 'r_sho':6, 'l_elb':7, 'r_elb':8, 'l_wri':9, 'r_wri':10,
+      'l_hip':11, 'r_hip':12, 'l_kne':13, 'r_kne':14, 'l_ank':15, 'r_ank':16}
+
+def _angle(a, b, c):
+    """Angle at b (degrees). Returns 0 if any point invalid."""
+    ba = a - b
+    bc = c - b
+    nba = np.linalg.norm(ba)
+    nbc = np.linalg.norm(bc)
+    if nba < 1e-6 or nbc < 1e-6:
+        return 0.0
+    cos = np.clip(np.dot(ba, bc) / (nba * nbc), -1.0, 1.0)
+    return float(np.degrees(np.arccos(cos)))
+
+def attach_pose_dynamics(beh_seq, pose_dir, key='pose_dyn', min_conf=0.3, verbose=True):
+    """Compact dynamic pose features (recommended over raw 51-d).
+
+    Per frame (16-d):
+      - 8 velocities of key joints (l/r ankle, knee, hip, shoulder)  [8]
+      - 4 angles: l_knee, r_knee, l_hip, r_hip                       [4]
+      - 2 shoulder width / height ratios                             [2]
+      - 2 head orientation proxy (nose relative to shoulder midpoint) [2]
+    First frame velocities = 0. Missing keypoints -> 0.
+    """
+    out = []
+    missing_tracks = 0
+    for i, paths in enumerate(beh_seq['image']):
+        pid = beh_seq['ped_id'][i][0][0]
+        sid, vid, _ = _parse_frame_path(paths[0])
+        f = os.path.join(pose_dir, sid, vid, f'{pid}.npz')
+        track = []
+        if not os.path.isfile(f):
+            missing_tracks += 1
+            out.append([[0.0]*16 for _ in paths])
+            continue
+        z = np.load(f)
+        row_of = {int(fr): r for r, fr in enumerate(z['frames'])}
+        kpts = z['kpts']  # (T,17,3)
+        prev_xy = None
+        for j, p in enumerate(paths):
+            x1, y1, x2, y2 = beh_seq['bbox'][i][j]
+            w, h = max(x2-x1, 1.0), max(y2-y1, 1.0)
+            r = row_of.get(_parse_frame_path(p)[2])
+            vec = np.zeros(16, np.float32)
+            if r is not None:
+                k = kpts[r].copy()
+                ok = k[:, 2] >= min_conf
+                # relative xy
+                rel = np.zeros((17, 2), np.float32)
+                rel[ok, 0] = (k[ok, 0] - x1) / w
+                rel[ok, 1] = (k[ok, 1] - y1) / h
+                # velocities of 8 key joints
+                key_idx = [KP['l_ank'], KP['r_ank'], KP['l_kne'], KP['r_kne'],
+                           KP['l_hip'], KP['r_hip'], KP['l_sho'], KP['r_sho']]
+                if prev_xy is not None:
+                    for ii, ki in enumerate(key_idx):
+                        if ok[ki]:
+                            vec[ii] = np.linalg.norm(rel[ki] - prev_xy[ki])
+                prev_xy = rel.copy()
+                # angles
+                def get(kp):
+                    return rel[KP[kp]] if ok[KP[kp]] else None
+                la, lk, lh = get('l_ank'), get('l_kne'), get('l_hip')
+                ra, rk, rh = get('r_ank'), get('r_kne'), get('r_hip')
+                if la is not None and lk is not None and lh is not None:
+                    vec[8] = _angle(la, lk, lh) / 180.0
+                if ra is not None and rk is not None and rh is not None:
+                    vec[9] = _angle(ra, rk, rh) / 180.0
+                if lk is not None and lh is not None and get('l_sho') is not None:
+                    vec[10] = _angle(lk, lh, get('l_sho')) / 180.0
+                if rk is not None and rh is not None and get('r_sho') is not None:
+                    vec[11] = _angle(rk, rh, get('r_sho')) / 180.0
+                # shoulder width / height
+                if ok[KP['l_sho']] and ok[KP['r_sho']]:
+                    vec[12] = np.linalg.norm(rel[KP['l_sho']] - rel[KP['r_sho']])
+                if ok[KP['l_hip']] and ok[KP['r_hip']]:
+                    vec[13] = np.linalg.norm(rel[KP['l_hip']] - rel[KP['r_hip']])
+                # head orientation proxy
+                if ok[KP['nose']] and ok[KP['l_sho']] and ok[KP['r_sho']]:
+                    mid_sho = 0.5 * (rel[KP['l_sho']] + rel[KP['r_sho']])
+                    vec[14:16] = rel[KP['nose']] - mid_sho
+            track.append(vec.tolist())
+        out.append(track)
+    beh_seq[key] = out
+    if verbose:
+        print(f'[pose_dyn] attached 16-d dynamics; tracks without file: {missing_tracks}/{len(out)}')
+    return beh_seq
 
 # Cityscapes trainId groups -> 6 scene classes
 _GROUPS = {'road': [0], 'sidewalk': [1], 'vehicle': [13, 14, 15, 16],
@@ -381,6 +470,70 @@ def attach_flow_relative(beh_seq, verbose=True):
     beh_seq['flow_rel_bbox_crop'] = rel_bbox
     if verbose:
         print('[flow_relative] attached flow_rel_ped_crop and flow_rel_bbox_crop')
+    return beh_seq
+
+def attach_flow_residual_stats(beh_seq, flow_root, verbose=True):
+    """Residual flow features that better isolate pedestrian and moving-object motion.
+
+    Requires crop_full and ped_mask modes to have been extracted.
+    Produces:
+      flow_res_ped_crop : mean residual (ped - crop)  [2]
+      flow_res_mag      : magnitude of residual mean  [1]
+      flow_res_std      : std of residual inside ped mask [2]
+      flow_upper_mag    : mean magnitude in upper half of bbox (body) [1]
+      flow_lower_mag    : mean magnitude in lower half of bbox (legs) [1]
+    Total 7-d per frame. Zero when data missing.
+    """
+    import os
+    from pathlib import Path
+
+    def _load_flow_map(flow_root, mode, sid, vid, pid, frame):
+        p = Path(flow_root) / mode / sid / vid / pid / f"{frame:05d}.npz"
+        if not p.is_file():
+            return None
+        return np.load(p)['flow'].astype(np.float32)
+
+    out_keys = ['flow_res_ped_crop', 'flow_res_mag', 'flow_res_std',
+                'flow_upper_mag', 'flow_lower_mag']
+    for k in out_keys:
+        beh_seq[k] = []
+
+    n_tracks = len(beh_seq['image'])
+    missing = 0
+    for i, paths in enumerate(beh_seq['image']):
+        pid = beh_seq['ped_id'][i][0][0]
+        sid, vid, _ = _parse_frame_path(paths[0])
+        track = {k: [] for k in out_keys}
+        for p in paths:
+            fr = _parse_frame_path(p)[2]
+            flow_crop = _load_flow_map(flow_root, 'crop_full', sid, vid, pid, fr)
+            flow_ped = _load_flow_map(flow_root, 'ped_mask', sid, vid, pid, fr)
+            if flow_crop is None or flow_ped is None:
+                missing += 1
+                for k in out_keys:
+                    track[k].append([0.0] * (2 if 'std' in k or 'ped_crop' in k else 1))
+                continue
+            # residual map
+            res = flow_ped - flow_crop
+            # mean residual
+            res_mean = res.mean(axis=(0, 1))
+            mag = float(np.linalg.norm(res_mean))
+            res_std = res.std(axis=(0, 1))
+            # upper / lower half of the crop (approximate legs vs body)
+            h = res.shape[0]
+            upper = res[:h//2]
+            lower = res[h//2:]
+            upper_mag = float(np.linalg.norm(upper.mean(axis=(0, 1))))
+            lower_mag = float(np.linalg.norm(lower.mean(axis=(0, 1))))
+            track['flow_res_ped_crop'].append(res_mean.tolist())
+            track['flow_res_mag'].append([mag])
+            track['flow_res_std'].append(res_std.tolist())
+            track['flow_upper_mag'].append([upper_mag])
+            track['flow_lower_mag'].append([lower_mag])
+        for k in out_keys:
+            beh_seq[k].append(track[k])
+    if verbose:
+        print(f'[flow_residual] attached {out_keys}; missing frames ~{missing}')
     return beh_seq
 
 def attach_tte(beh_seq, key='tte', verbose=True):
