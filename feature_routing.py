@@ -364,7 +364,10 @@ def build_intention_model(intent):
         bias_regularizer=intent._bias_regularizer,
         activation=intent._activation,
         recurrent_activation=intent._lstm_recurrent_activation)
-
+    extra_do = getattr(intent, 'extra_input_dropout', None)
+    extra_do = intent._lstm_dropout if extra_do is None else float(extra_do)
+    extra_kw = {**lstm_kw, 'dropout': extra_do}
+    print(f"[config] extra_input_dropout={extra_do} (core keeps {intent._lstm_dropout})")
     if fusion == 'pie':
         if rs:
             # visual is already (B, T, flat); no RepeatVector needed
@@ -399,7 +402,7 @@ def build_intention_model(intent):
             branches = [vis_h]
             for feat_name, start, end in spans:
                 part = SliceColumns(start, end, name=f'slice_{feat_name}')(dec_in)
-                out = LSTM(name=f'branch_{feat_name}', return_sequences=temporal, **lstm_kw)(part)
+                out = LSTM(name=f'branch_{feat_name}', return_sequences=temporal, **extra_kw)(part)
                 if temporal:
                     out = AdditiveTemporalAttention(name=f'tattn_{feat_name}')(out)
                 branches.append(out)
@@ -427,7 +430,7 @@ def build_intention_model(intent):
                 if feat_name == 'bbox':
                     continue
                 part = SliceColumns(start, end, name=f'slice_{feat_name}')(dec_in)
-                out = LSTM(name=f'branch_{feat_name}', return_sequences=temporal, **lstm_kw)(part)
+                out = LSTM(name=f'branch_{feat_name}', return_sequences=temporal, **extra_kw)(part)
                 if temporal:
                     out = AdditiveTemporalAttention(name=f'tattn_{feat_name}')(out)
                 branches.append(out)

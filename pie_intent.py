@@ -913,6 +913,7 @@ class PIEIntent(object):
                 'percentile_scale': getattr(self, 'percentile_scale', None),
                 'zero_decoder_bbox': getattr(self, 'zero_decoder_bbox', False),
                 'aux_loss_weight': float(getattr(self, 'aux_loss_weight', 0.0) or 0.0),
+                'extra_input_dropout': getattr(self, 'extra_input_dropout', None),
             }
             with open(hyperparams_path, 'w', encoding='utf-8') as fid:
                 json.dump(hyperparams, fid, indent=2, default=str)
@@ -1105,6 +1106,9 @@ class PIEIntent(object):
                             ]
             if not use_plateau:
                 call_backs.remove(plateau_sch)
+            from attention_log import AttentionLogger
+            call_backs.insert(1, AttentionLogger(
+                self, val_eval_dataset, os.path.join(model_folder_path, 'attention_log.json')))
 
             # Reseed numpy right before fit so the epoch-shuffle stream
             # (np.random.permutation in the generator) depends only on `seed`.

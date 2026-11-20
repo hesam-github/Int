@@ -630,6 +630,7 @@ def start_run(opts, hp, data, ident, pie_path):
     model.feature_norm = opts.get('feature_norm') or {}
     model.zero_decoder_bbox = opts.get('zero_decoder_bbox', False)
     model.use_visual = opts.get('use_visual', True)
+    model.extra_input_dropout = 0.0
     model.capacity = opts.get('capacity')
     cap = opts.get('capacity') or {}
     if cap.get('hidden_units') and int(cap['hidden_units']) != model._num_hidden_units:
