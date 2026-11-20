@@ -561,7 +561,10 @@ class PIEIntent(object):
                 {'temporal_encoder': self.temporal_encoder,
                  'temporal_hp': getattr(self, 'temporal_hp', {}),
                  'temporal_fusion': getattr(self, 'temporal_fusion', 'pie_concat'),
-                 'feature_spans': getattr(self, 'feature_spans', None)},
+                 'feature_spans': getattr(self, 'feature_spans', None),
+                 'visual_norm': getattr(self, 'visual_norm', None),
+                 'capacity': getattr(self, 'capacity', None),
+                 'percentile_scale': getattr(self, 'percentile_scale', None)},
                 seq_len=self._sequence_length,
                 decoder_dim=self._decoder_input_size,
                 lstm_units=self._num_hidden_units,
@@ -1168,6 +1171,9 @@ class PIEIntent(object):
         # Evaluate with the SAME bbox representation the checkpoint was trained with.
         self.normalize_decoder_bbox = bool(saved_hp.get('normalize_decoder_bbox', False))
         from feature_routing import restore_routing, CUSTOM_OBJECTS
+        from temporal_encoders import CUSTOM_OBJECTS as TEMPORAL_OBJECTS
+        custom_objects = dict(CUSTOM_OBJECTS)
+        custom_objects.update(TEMPORAL_OBJECTS)
 
         restore_routing(self, saved_hp)
         self.temporal_encoder = saved_hp.get('temporal_encoder')
@@ -1179,7 +1185,7 @@ class PIEIntent(object):
                                              weights='imagenet')
         try:
             test_model = load_model(os.path.join(model_path, 'model.h5'),
-                                    compile=False, custom_objects=CUSTOM_OBJECTS)
+                                    compile=False, custom_objects=custom_objects)
         except:
             test_model = self.get_model(train_params['model'])
             test_model.load_weights(os.path.join(model_path, 'model.h5'))

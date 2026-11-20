@@ -24,7 +24,7 @@ ARCHITECTURES = {
         'feature_target': 'decoder',
     },
     'branchattn_temporal': {
-        'desc': 'Same sub-menu as branchattn. Temporal attention is only inside extra branches of core_plus_extras',
+        'desc': 'Same sub-menu as branchattn. static_pool: temporal attention on every span including bbox. core_plus_extras: temporal attention only on extra spans, not on the core. temporal_concat: no temporal attention.',
         'fusion': 'branchattn_temporal',
         'feature_target': 'decoder',
     },
@@ -43,6 +43,11 @@ ARCHITECTURES = {
         'fusion': 'pie',
         'feature_target': 'decoder',
         'use_temporal_menu': True,
+    },
+    'decoder_only': {
+        'desc': 'use_visual=False. One LSTM on the decoder matrix. No ConvLSTM, no visual_norm, no capacity.',
+        'fusion': 'pie',
+        'feature_target': 'decoder',
     },
 }
 
@@ -106,9 +111,13 @@ def interactive_pick_aux_loss(default=0.0):
     return 0.0
 
 def interactive_pick_fusion_mode(has_offline_features, default='pie_concat'):
-    """Choose how visual context is fused with decoder features.
-    Only meaningful when offline features are present.
+    """Dead menu. Do not call.
+    branchattn uses branch_mode. Option 8 uses temporal_fusion.
+    This question used to be stored as opts['fusion_mode'] and never reached the graph.
     """
+    raise RuntimeError(
+        "interactive_pick_fusion_mode is not wired. "
+        "Use branch_mode or temporal_fusion.")
     if not has_offline_features:
         return 'pie_concat'
     print('\n--- Fusion mode (when offline features are present) ---')

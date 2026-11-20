@@ -172,7 +172,7 @@ def _ask_yes_no(prompt, default=False):
     return raw in ("y", "yes")
 
 
-def interactive_pick_capacity():
+def interactive_pick_capacity(ask_return_sequences=True):
     print("\n[capacity] presets for the visual branch "
           "(every choice except the baseline deviates from the paper):")
     for i, (name, _) in enumerate(PRESETS):
@@ -194,9 +194,15 @@ def interactive_pick_capacity():
 
     spec["log1p"] = _ask_yes_no("add log1p to VGG features before the ConvLSTM (tail test)?",
                                 default=False)
-    spec["return_sequences"] = _ask_yes_no(
-        "ConvLSTM return_sequences=True? (sequence of maps instead of last step only)",
-        default=False)
+    if ask_return_sequences:
+        spec["return_sequences"] = _ask_yes_no(
+            "ConvLSTM return_sequences=True? (sequence of maps instead of last step only)",
+            default=False)
+    else:
+        spec["return_sequences"] = False
+        print("[capacity] return_sequences is not asked. "
+              "Only feature_routing fusion='pie' can use a sequence of maps. "
+              "temporal_encoders repeats one context vector.")
 
     rows, total, flat = budget(spec)
     print_budget(spec, rows, total, flat)

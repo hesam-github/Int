@@ -152,28 +152,28 @@ class S4Layer(tf.keras.layers.Layer):
         super().build(input_shape)
 
     def call(self, tokens):
-        dt = tf.exp(self.log_dt)
-        eye = tf.eye(self.n_state)
-        structured = self.A + tf.linalg.diag(self.delta_diag)
-        dt_a = dt[:, None, None] * structured[None, :, :]
-        left = eye[None, :, :] - 0.5 * dt_a
-        right = eye[None, :, :] + 0.5 * dt_a
-        a_bar = tf.linalg.solve(left, right)
-        b_bar = tf.linalg.solve(left, (dt[:, None] * self.B)[:, :, None])[:, :, 0]
+        dt = tf.cast(tf.exp(self.log_dt), tf.complex64)
+        real = -tf.exp(self.log_A_real)
+        imag = tf.broadcast_to(self.A_imag[None, :], tf.shape(real))
+        A = tf.complex(real, imag)
+        B = tf.complex(self.B_real, self.B_imag)
+        C = tf.complex(self.C_real, self.C_imag)
+        a_bar = (1.0 + dt * A / 2.0) / (1.0 - dt * A / 2.0)
+        b_bar = dt * B / (1.0 - dt * A / 2.0)
         series = tf.transpose(tokens, [1, 0, 2])
 
         def step(h_prev, x_t):
-            h = tf.einsum('hij,bhj->bhi', a_bar, h_prev)
-            return h + b_bar[None, :, :] * x_t[:, :, None]
+            x_c = tf.cast(x_t, tf.complex64)[:, :, None]
+            return a_bar[None, :, :] * h_prev + b_bar[None, :, :] * x_c
 
-        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, self.n_state))
+        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, self.n_complex), dtype=tf.complex64)
         states = tf.scan(step, series, initializer=h0)
-        y = tf.einsum('lbhi,hi->lbh', states, self.C)
+        y = 2.0 * tf.math.real(tf.reduce_sum(tf.math.conj(C)[None, None, :, :] * states, axis=-1))
         return self.out(tf.transpose(y, [1, 0, 2]))[:, -1, :]
 
     def get_config(self):
         config = super().get_config()
-        config.update(d_model=self.d_model, n_state=self.n_state)
+        config.update(d_model=self.d_model, n_complex=self.n_complex)
         return config
 
 
@@ -518,6 +518,30 @@ class PerPositionTemporal(tf.keras.layers.Layer):
             recurrent_activation=self.recurrent_activation_name, l2_value=self.l2_value)
         return config
 
+def _apply_shared_visual_front(maps, visual_norm, capacity, percentile_scale):
+    """Same channel ops as feature_routing, so option 8 honours the visual menu.
+    Does not change padding and does not implement return_sequences."""
+    from visual_norm import ChannelStandardize, visual_op_order
+    from feature_routing import Log1p
+    cap = capacity or {}
+    vn = visual_norm or None
+    ops = visual_op_order(vn, cap)
+    print(f"[temporal visual_pipeline] VGG -> {' -> '.join(ops) if ops else '(raw)'}")
+    for op in ops:
+        if op == 'standardize':
+            maps = ChannelStandardize(vn['mean'], vn['std'], name='visual_standardize')(maps)
+        else:
+            maps = Log1p(name='log1p_input')(maps)
+    if percentile_scale:
+        from visual_percentile import PositivePercentileScale
+        maps = PositivePercentileScale(percentile_scale['scales'], name='visual_percentile')(maps)
+        print("[temporal visual_pipeline] applied PositivePercentileScale")
+    if cap.get('input_reduce'):
+        maps = TimeDistributed(
+            Conv2D(int(cap['input_reduce']), 1, name='input_reduce_conv'),
+            name='input_reduce')(maps)
+        print(f"[temporal] input_reduce 1x1 -> {int(cap['input_reduce'])}")
+    return maps
 
 def build_pie_temporal_model(encoder_name,
                              seq_len=15,
@@ -537,7 +561,10 @@ def build_pie_temporal_model(encoder_name,
                              recurrent_activation='hard_sigmoid',
                              l2_value=0.001,
                              fusion_mode='pie_concat',
-                             feature_spans=None):
+                             feature_spans=None,
+                             visual_norm=None,
+                             capacity=None,
+                             percentile_scale=None):
     """encoder_name selects only the visual temporal block. Decoder is shared.
 
     'convfact_*' (strategy 'factorized'): locked input dropout -> per-frame Conv2D
@@ -549,11 +576,18 @@ def build_pie_temporal_model(encoder_name,
 
     encoder_in = Input(shape=(seq_len,) + tuple(vgg_shape), name='encoder_input')
     decoder_in = Input(shape=(seq_len, decoder_dim), name='decoder_input')
+    cap = capacity or {}
+    if cap.get('return_sequences'):
+        print("[temporal] return_sequences=True ignored. This decoder needs one context vector.")
+    maps = _apply_shared_visual_front(encoder_in, visual_norm, cap, percentile_scale)
+    in_ch = int(cap['input_reduce']) if cap.get('input_reduce') else int(vgg_shape[-1])
+    spatial = (int(vgg_shape[0]), int(vgg_shape[1]), in_ch)
+    print("[temporal] padding stays SAME for convlstm2d and convfact_*. "
+          "feature_routing pie stays VALID. Do not compare their AUC as the same ConvLSTM.")
 
     if encoder_name in FACTORIZED_ENCODER_INFO:
-        # Same mask at every timestep, like Keras ConvLSTM2D(dropout=...) on its input.
-        grid = Dropout(dropout, noise_shape=(None, 1) + tuple(vgg_shape),
-                       name='locked_input_dropout')(encoder_in)
+        grid = Dropout(dropout, noise_shape=(None, 1) + spatial,
+                       name='locked_input_dropout')(maps)
         grid = TimeDistributed(
             Conv2D(convlstm_filters, convlstm_kernel, padding='same', activation='relu',
                    kernel_regularizer=_l2(l2_value)),
@@ -564,21 +598,31 @@ def build_pie_temporal_model(encoder_name,
             n_state=n_state, dropout=dropout, recurrent_dropout=recurrent_dropout,
             recurrent_activation=recurrent_activation, l2_value=l2_value,
             name='per_position_temporal')(grid)
+        if cap.get('encoder_reduce'):
+            grid = Conv2D(int(cap['encoder_reduce']), 1, name='encoder_reduce')(grid)
+            print(f"[temporal] encoder_reduce 1x1 -> {int(cap['encoder_reduce'])}")
         context = Flatten(name='encoder_flatten')(grid)
     elif encoder_name == 'convlstm2d':
         conv = ConvLSTM2D(
             filters=convlstm_filters, kernel_size=convlstm_kernel, padding='same',
             return_sequences=False, dropout=dropout, recurrent_dropout=recurrent_dropout,
             kernel_regularizer=_l2(l2_value), recurrent_regularizer=_l2(l2_value),
-            bias_regularizer=_l2(l2_value), name='conv_lstm2d')(encoder_in)
+            bias_regularizer=_l2(l2_value), name='conv_lstm2d')(maps)
+        if cap.get('encoder_reduce'):
+            conv = Conv2D(int(cap['encoder_reduce']), 1, name='encoder_reduce')(conv)
+            print(f"[temporal] encoder_reduce 1x1 -> {int(cap['encoder_reduce'])}")
         context = Flatten(name='encoder_flatten')(conv)
     elif encoder_name == 'convlstm':
+        if cap.get('encoder_reduce'):
+            print("[temporal] encoder_reduce skipped: matched convlstm pools each frame.")
         context = MatchedConvLSTM(
             d_model, filters=convlstm_filters, kernel=convlstm_kernel,
             dropout=dropout, recurrent_dropout=recurrent_dropout,
-            l2_value=l2_value)(encoder_in)
+            l2_value=l2_value)(maps)
     else:
-        tokens = SpatialStem(d_model, l2_value=l2_value)(encoder_in)
+        if cap.get('encoder_reduce'):
+            print("[temporal] encoder_reduce skipped: SpatialStem already collapses 7x7.")
+        tokens = SpatialStem(d_model, l2_value=l2_value)(maps)
         if encoder_name == 'transformer':
             context = TemporalTransformer(
                 d_model, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
@@ -599,7 +643,6 @@ def build_pie_temporal_model(encoder_name,
                     d_model, n_heads=num_heads, n_state=n_state, mimo_rank=mimo_rank)(sequence)
             context = LastStep()(sequence)
 
-    repeated = RepeatVector(seq_len)(context)
     lstm_kw = dict(
         units=lstm_units, dropout=dropout, recurrent_dropout=recurrent_dropout,
         activation='tanh', recurrent_activation=recurrent_activation,
@@ -631,6 +674,9 @@ def build_pie_temporal_model(encoder_name,
         visual_vec = context  # (B, d_model)
 
         kin_names = {'bbox', 'velocity', 'flow_bbox', 'flow_crop', 'flow_ped'}
+        print("[temporal] adaptive kin = bbox, velocity, flow_bbox, flow_crop, flow_ped. "
+              "pose, scene, scene_critical, flow_rel go to the geometric branch. "
+              "This split is hardcoded, not a tested scientific grouping.")
         kin_parts, geo_parts = [], []
         for name, start, end in (feature_spans or []):
             part = SliceColumns(int(start), int(end), name=f'slice_{name}')(decoder_in)
@@ -933,6 +979,11 @@ def build_from_run_opts(opts, seq_len, decoder_dim, lstm_units, dropout,
     """Rebuild the model from the dict saved in hyperparams.json."""
     name = opts.get('temporal_encoder', 'convlstm2d')
     hp = dict(opts.get('temporal_hp') or {})
+    base = name[len('convfact_'):] if str(name).startswith('convfact_') else name
+    if base in ('s4', 's4d') and not str(name).startswith('convfact_'):
+        n_default = 64
+    else:
+        n_default = 16
     return build_pie_temporal_model(
         name,
         seq_len=seq_len,
@@ -941,7 +992,7 @@ def build_from_run_opts(opts, seq_len, decoder_dim, lstm_units, dropout,
         d_model=hp.pop('d_model', 128),
         convlstm_filters=hp.pop('convlstm_filters', 64),
         convlstm_kernel=hp.pop('convlstm_kernel', 2),
-        n_state=hp.pop('n_state', 64 if name in ('s4', 's4d') else 16),
+        n_state=hp.pop('n_state', n_default),
         num_heads=hp.pop('num_heads', 4),
         num_layers=hp.pop('num_layers', 2),
         ff_mult=hp.pop('ff_mult', 4),
@@ -952,7 +1003,10 @@ def build_from_run_opts(opts, seq_len, decoder_dim, lstm_units, dropout,
         recurrent_activation=recurrent_activation,
         l2_value=l2_value,
         fusion_mode=opts.get('temporal_fusion', 'pie_concat'),
-        feature_spans=opts.get('feature_spans'))
+        feature_spans=opts.get('feature_spans'),
+        visual_norm=opts.get('visual_norm'),
+        capacity=opts.get('capacity'),
+        percentile_scale=opts.get('percentile_scale'))
 
 
 CUSTOM_OBJECTS = {

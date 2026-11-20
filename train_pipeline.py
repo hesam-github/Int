@@ -111,9 +111,35 @@ def pick_run_options(hp):
     opts['use_visual'] = interactive_pick_use_visual()
     print(f"[config] USE_VISUAL = {opts['use_visual']}")
 
+    from architecture_registry import (
+        interactive_pick_architecture, get_architecture_config,
+        interactive_pick_branch_mode,
+    )
+    if opts['use_visual']:
+        opts['architecture'] = interactive_pick_architecture()
+    else:
+        opts['architecture'] = 'decoder_only'
+        print("[config] use_visual=False -> architecture=decoder_only. "
+              "No ConvLSTM menu. Folder is not pie_convlstm.")
+    arch_cfg = get_architecture_config(opts['architecture'])
+    print(f"[config] ARCHITECTURE = {opts['architecture']}")
+
+    opts['branch_mode'] = None
+    if opts['architecture'] in ('branchattn', 'branchattn_temporal'):
+        opts['branch_mode'] = interactive_pick_branch_mode()
+        print(f"[config] BRANCH_MODE = {opts['branch_mode']}")
+
+    opts['temporal_encoder'] = None
+    opts['temporal_hp'] = {}
+    opts['temporal_fusion'] = 'pie_concat'
+    if arch_cfg.get('use_temporal_menu', False):
+        from temporal_encoders import choose_temporal_for_menu
+        choose_temporal_for_menu(opts)
+
     opts['zero_decoder_bbox'] = interactive_pick_zero_decoder_bbox(opts['use_visual'])
     print(f"[config] ZERO_DECODER_BBOX = {opts['zero_decoder_bbox']}")
 
+    temporal = opts['architecture'] == 'temporal_encoders'
     while True:
         opts['visual_norm'] = interactive_pick_visual_norm() if opts['use_visual'] else False
         print(f"[config] VISUAL_NORM = {opts['visual_norm']}")
@@ -123,8 +149,15 @@ def pick_run_options(hp):
         else:
             opts['use_percentile'] = False
         print(f"[config] USE_PERCENTILE = {opts['use_percentile']}")
-        opts['capacity'] = interactive_pick_capacity() if opts['use_visual'] else None
+        opts['capacity'] = (interactive_pick_capacity(ask_return_sequences=not temporal)
+                            if opts['use_visual'] else None)
         print(f"[config] CAPACITY = {opts['capacity']}")
+        if temporal and opts.get('capacity'):
+            print("[capacity] the numeric budget assumes feature_routing padding=valid. "
+                  "Option 8 keeps padding=same. Do not quote that total as the option-8 parameter count.")
+            if opts['capacity'].get('encoder_reduce'):
+                print("[capacity] encoder_reduce is applied only when option 8 still has a 7x7 map "
+                      "(convlstm2d or convfact_*). SpatialStem encoders skip it and print that.")
 
         if not opts['use_visual'] or confirm_visual_pipeline(opts['visual_norm'], opts['capacity']):
             break
@@ -327,30 +360,50 @@ def choose_run_identity(opts, data, hp, pie_path):
     opts['feature_norm'] = interactive_pick_feature_norms(
         decoder_features, opts['extra_norm'], feature_stds=feature_stds)
 
-    from architecture_registry import (
-        interactive_pick_architecture, get_architecture_config,
-        interactive_pick_branch_mode, interactive_pick_aux_loss,
-        interactive_pick_fusion_mode,
-    )
-    # The architecture menu is only meaningful when the VGG16 context is used.
-    arch_name = interactive_pick_architecture() if use_visual else 'pie_convlstm'
+    from architecture_registry import get_architecture_config, interactive_pick_aux_loss
+    arch_name = opts.get('architecture')
+    if not arch_name:
+        from architecture_registry import interactive_pick_architecture
+        arch_name = interactive_pick_architecture() if use_visual else 'decoder_only'
+        opts['architecture'] = arch_name
     arch_cfg = get_architecture_config(arch_name)
-
-    opts['branch_mode'] = None
-    if arch_name in ('branchattn', 'branchattn_temporal'):
-        opts['branch_mode'] = interactive_pick_branch_mode()
-        print(f"[config] BRANCH_MODE = {opts['branch_mode']}")
 
     opts['feature_target'] = arch_cfg['feature_target']
     opts['fusion'] = arch_cfg['fusion']
     opts['zero_visual'] = arch_cfg.get('zero_visual', False)
+    if 'branch_mode' not in opts:
+        opts['branch_mode'] = None
+    if arch_name in ('branchattn', 'branchattn_temporal') and not opts.get('branch_mode'):
+        from architecture_registry import interactive_pick_branch_mode
+        opts['branch_mode'] = interactive_pick_branch_mode()
+    if not arch_cfg.get('use_temporal_menu', False):
+        opts['temporal_encoder'] = None
+        opts['temporal_hp'] = {}
+        opts['temporal_fusion'] = 'pie_concat'
+    elif not opts.get('temporal_encoder'):
+        from temporal_encoders import choose_temporal_for_menu
+        choose_temporal_for_menu(opts)
 
     print(f"[config] ARCHITECTURE  = {arch_name}")
     print(f"[config] FUSION        = {opts['fusion']}")
     print(f"[config] FEATURE_TARGET= {opts['feature_target']}")
+    print(f"[config] BRANCH_MODE   = {opts.get('branch_mode')}")
     print(f"[config] ZERO_VISUAL   = {opts['zero_visual']}")
-    print(f"[config] EXTRA_NORM    = {opts['extra_norm']}")
-    print(f"[config] FEATURE_NORM  = {opts['feature_norm']}")
+    print(f"[config] TEMPORAL_FUSION = {opts.get('temporal_fusion')}")
+
+    if use_visual and 'bbox_branch' in decoder_features and opts['fusion'] == 'pie':
+        print("[warning] bbox_branch + fusion=pie: the copy is only concatenated into the "
+              "decoder input. For a PARALLEL bbox branch choose branchattn or branchattn_temporal.")
+
+    opts['aux_loss_weight'] = 0.0
+    aux_applies = (arch_name in ('branchattn', 'branchattn_temporal')
+                   and opts.get('branch_mode') in ('static_pool', 'core_plus_extras'))
+    if aux_applies:
+        opts['aux_loss_weight'] = interactive_pick_aux_loss()
+    else:
+        print("[config] AUX_LOSS_WEIGHT = 0. This graph does not build aux heads. "
+              "pcpa, temporal_concat, pie, and option 8 do not.")
+    print(f"[config] AUX_LOSS_WEIGHT = {opts['aux_loss_weight']}")
 
     if use_visual and 'bbox_branch' in decoder_features and opts['fusion'] == 'pie':
         print("[warning] bbox_branch + fusion=pie: the copy is only concatenated into the "
