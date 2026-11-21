@@ -28,7 +28,8 @@ use_visual=False -> decoder-only model, no VGG16 input at all.
 """
 import numpy as np
 import tensorflow as tf
-from keras.layers import Concatenate, ConvLSTM2D, Dense, Flatten, Input, LSTM, RepeatVector, Conv2D, TimeDistributed
+from keras.layers import (Concatenate, ConvLSTM2D, Dense, Dropout, Flatten, Input, LSTM,
+                          RepeatVector, Conv2D, TimeDistributed)
 from keras.models import Model
 from visual_norm import ChannelStandardize, visual_op_order
 from utils import PIE_IMG_WIDTH, PIE_IMG_HEIGHT
@@ -136,7 +137,46 @@ CUSTOM_OBJECTS = {
     'Log1p': Log1p,
     'PositivePercentileScale': PositivePercentileScale,
 }
+from temporal_encoders import CUSTOM_OBJECTS as _TEMPORAL_OBJECTS
+CUSTOM_OBJECTS.update(_TEMPORAL_OBJECTS)
 
+def make_sequence_branch(kind, feat, seq_in, units, lstm_kw, hp=None, dropout=0.0,
+                         l2_value=0.0, attention=False):
+    """(B, T, D) -> (B, units) for one decoder branch.
+    kind='lstm' reproduces the original branch (same layer names).
+    Other kinds: Dense(units) per step, dropout, temporal block, last step.
+    attention=True is honoured only for 'lstm'."""
+    if kind == 'lstm':
+        out = LSTM(name=f'branch_{feat}', return_sequences=attention, **lstm_kw)(seq_in)
+        if attention:
+            out = AdditiveTemporalAttention(name=f'tattn_{feat}')(out)
+        return out
+    from temporal_encoders import (BRANCH_KINDS, TemporalTransformer, S4Layer, S4DLayer,
+                                   MambaBlock, LastStep)
+    if kind not in BRANCH_KINDS:
+        raise ValueError(f'unknown branch temporal kind: {kind!r}')
+    hp = dict(hp or {})
+    n_state = int(hp.get('n_state', 16))
+    n_layers = int(hp.get('num_layers', 1))
+    x = Dense(units, kernel_regularizer=lstm_kw.get('kernel_regularizer'),
+              name=f'bproj_{feat}')(seq_in)
+    if dropout:
+        x = Dropout(dropout, name=f'bdrop_{feat}')(x)
+    if kind == 'transformer':
+        heads = int(hp.get('num_heads', 4))
+        if units % heads:
+            raise ValueError(f'hidden units {units} not divisible by num_heads {heads}')
+        return TemporalTransformer(
+            units, num_heads=heads, num_layers=n_layers, ff_mult=int(hp.get('ff_mult', 4)),
+            dropout=min(float(dropout), 0.1), l2_value=l2_value, causal=True,
+            name=f'bblock_{feat}')(x)
+    if kind == 's4':
+        return S4Layer(units, n_state=n_state, name=f'bblock_{feat}')(x)
+    if kind == 's4d':
+        return S4DLayer(units, n_complex=n_state, name=f'bblock_{feat}')(x)
+    for k in range(n_layers):
+        x = MambaBlock(units, n_state=n_state, name=f'bblock_{feat}_{k}')(x)
+    return LastStep(name=f'blast_{feat}')(x)
 
 def bbox_log_ratio(block):
     """Same transform as PIEIntent._normalize_decoder_bbox, for any (..., 4) raw block."""
@@ -234,6 +274,10 @@ def restore_routing(model, hyperparams):
     model.feature_target = hyperparams.get('feature_target', 'decoder')
     model.fusion = hyperparams.get('fusion', 'pie')
     model.branch_mode = hyperparams.get('branch_mode')
+    model.branch_temporal_kind = hyperparams.get('branch_temporal_kind')
+    model.branch_temporal_hp = hyperparams.get('branch_temporal_hp')
+    model.branch_visual_encoder = hyperparams.get('branch_visual_encoder')
+    model.branch_visual_hp = hyperparams.get('branch_visual_hp')
     model.temporal_fusion = hyperparams.get('temporal_fusion', 'pie_concat')
     model.extra_norm = hyperparams.get('extra_norm', 'none')
     model.extra_norm_stats = hyperparams.get('extra_norm_stats')
@@ -332,28 +376,52 @@ def build_intention_model(intent):
         maps = BroadcastExtraChannels(name='tile_extra')([maps, extra])
 
     rs = bool(cap.get("return_sequences", False))
-    conv = ConvLSTM2D(
-        filters=intent._convlstm_num_filters,
-        kernel_size=intent._convlstm_kernel_size,
-        kernel_regularizer=intent._kernel_regularizer,
-        recurrent_regularizer=intent._recurrent_regularizer,
-        bias_regularizer=intent._bias_regularizer,
-        dropout=intent._lstm_dropout,
-        recurrent_dropout=intent._lstm_recurrent_dropout,
-        return_sequences=rs,
-        name='conv_lstm2d')(maps)
-    if cap.get('encoder_reduce'):
+    visual_encoder = getattr(intent, 'branch_visual_encoder', None)
+    custom_visual = (bool(visual_encoder) and visual_encoder != 'convlstm2d'
+                     and fusion in ('branchattn', 'branchattn_temporal'))
+    if custom_visual:
         if rs:
-            conv = TimeDistributed(
-                Conv2D(cap['encoder_reduce'], 1, name='encoder_reduce_conv'),
-                name='encoder_reduce')(conv)
-        else:
-            conv = Conv2D(cap['encoder_reduce'], 1, name='encoder_reduce')(conv)
-    if rs:
-        visual = TimeDistributed(Flatten(name='encoder_flatten'), name='td_flatten')(conv)
-        # visual shape: (B, T, flat)
+            raise ValueError("custom branch visual encoder needs ConvLSTM return_sequences=False")
+        from temporal_encoders import build_visual_context
+        vhp = dict(getattr(intent, 'branch_visual_hp', None) or {})
+        visual = build_visual_context(
+            visual_encoder, maps,
+            d_model=vhp.get('d_model', 128),
+            convlstm_filters=vhp.get('convlstm_filters', intent._convlstm_num_filters),
+            convlstm_kernel=vhp.get('convlstm_kernel', intent._convlstm_kernel_size),
+            n_state=vhp.get('n_state', 64 if visual_encoder in ('s4', 's4d') else 16),
+            num_heads=vhp.get('num_heads', 4), num_layers=vhp.get('num_layers', 2),
+            ff_mult=vhp.get('ff_mult', 4), mimo_rank=vhp.get('mimo_rank', 4),
+            dropout=intent._lstm_dropout,
+            recurrent_dropout=intent._lstm_recurrent_dropout,
+            recurrent_activation=intent._lstm_recurrent_activation,
+            l2_value=intent.reg_value)
+        if cap.get('encoder_reduce'):
+            print("[capacity] encoder_reduce is not applied to a custom visual encoder")
+        print(f"[config] branch visual encoder = {visual_encoder} {vhp}")
     else:
-        visual = Flatten(name='encoder_flatten')(conv)
+        conv = ConvLSTM2D(
+            filters=intent._convlstm_num_filters,
+            kernel_size=intent._convlstm_kernel_size,
+            kernel_regularizer=intent._kernel_regularizer,
+            recurrent_regularizer=intent._recurrent_regularizer,
+            bias_regularizer=intent._bias_regularizer,
+            dropout=intent._lstm_dropout,
+            recurrent_dropout=intent._lstm_recurrent_dropout,
+            return_sequences=rs,
+            name='conv_lstm2d')(maps)
+        if cap.get('encoder_reduce'):
+            if rs:
+                conv = TimeDistributed(
+                    Conv2D(cap['encoder_reduce'], 1, name='encoder_reduce_conv'),
+                    name='encoder_reduce')(conv)
+            else:
+                conv = Conv2D(cap['encoder_reduce'], 1, name='encoder_reduce')(conv)
+        if rs:
+            visual = TimeDistributed(Flatten(name='encoder_flatten'), name='td_flatten')(conv)
+            # visual shape: (B, T, flat)
+        else:
+            visual = Flatten(name='encoder_flatten')(conv)
 
     lstm_kw = dict(
         units=units,
@@ -398,6 +466,15 @@ def build_intention_model(intent):
         temporal = fusion == 'branchattn_temporal'
         mode = getattr(intent, 'branch_mode', None) or 'static_pool'
         print(f"[config] branch_mode={mode} temporal_attention={temporal}")
+        branch_kind = getattr(intent, 'branch_temporal_kind', None) or 'lstm'
+        branch_hp = dict(getattr(intent, 'branch_temporal_hp', None) or {})
+        attn = temporal and branch_kind == 'lstm'
+        if temporal and not attn:
+            print(f"[warning] additive temporal attention exists only for lstm branches; "
+                  f"ignored for '{branch_kind}'")
+        if mode == 'temporal_concat' and branch_kind != 'lstm':
+            print(f"[warning] temporal_concat has no branches; branch kind '{branch_kind}' ignored")
+        print(f"[config] branch_temporal_kind={branch_kind} {branch_hp}")
 
         if mode == 'static_pool':
             vis_h = Dense(units, activation='tanh', name='vis_proj',
@@ -405,9 +482,9 @@ def build_intention_model(intent):
             branches = [vis_h]
             for feat_name, start, end in spans:
                 part = SliceColumns(start, end, name=f'slice_{feat_name}')(dec_in)
-                out = LSTM(name=f'branch_{feat_name}', return_sequences=temporal, **extra_kw)(part)
-                if temporal:
-                    out = AdditiveTemporalAttention(name=f'tattn_{feat_name}')(out)
+                out = make_sequence_branch(
+                    branch_kind, feat_name, part, units, extra_kw, hp=branch_hp,
+                    dropout=extra_do, l2_value=intent.reg_value, attention=attn)
                 branches.append(out)
             hidden, attn_weights = BranchAttnPool(
                 len(branches), return_weights=True, name='branch_attention')(branches)
@@ -433,9 +510,9 @@ def build_intention_model(intent):
                 if feat_name == 'bbox':
                     continue
                 part = SliceColumns(start, end, name=f'slice_{feat_name}')(dec_in)
-                out = LSTM(name=f'branch_{feat_name}', return_sequences=temporal, **extra_kw)(part)
-                if temporal:
-                    out = AdditiveTemporalAttention(name=f'tattn_{feat_name}')(out)
+                out = make_sequence_branch(
+                    branch_kind, feat_name, part, units, extra_kw, hp=branch_hp,
+                    dropout=extra_do, l2_value=intent.reg_value, attention=attn)
                 branches.append(out)
                 names.append(feat_name)
             if len(branches) == 1:

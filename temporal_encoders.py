@@ -152,14 +152,14 @@ class S4Layer(tf.keras.layers.Layer):
         super().build(input_shape)
 
     def call(self, tokens):
-        dt = tf.cast(tf.exp(self.log_dt), tf.complex64)
-        real = -tf.exp(self.log_A_real)
-        imag = tf.broadcast_to(self.A_imag[None, :], tf.shape(real))
-        A = tf.complex(real, imag)
-        B = tf.complex(self.B_real, self.B_imag)
-        C = tf.complex(self.C_real, self.C_imag)
-        a_bar = (1.0 + dt * A / 2.0) / (1.0 - dt * A / 2.0)
-        b_bar = dt * B / (1.0 - dt * A / 2.0)
+        n = self.n_state
+        eye = tf.eye(n)
+        a_eff = self.A + tf.linalg.diag(self.delta_diag)            # (n, n)
+        dt = tf.exp(self.log_dt)                                     # (D,)
+        half = 0.5 * dt[:, None, None] * a_eff[None, :, :]           # (D, n, n)
+        lhs = eye[None, :, :] - half
+        a_bar = tf.linalg.solve(lhs, eye[None, :, :] + half)         # (D, n, n)
+        b_bar = tf.linalg.solve(lhs, (dt[:, None] * self.B)[:, :, None])[:, :, 0]  # (D, n)
         series = tf.transpose(tokens, [1, 0, 2])
 
         def step(h_prev, x_t):
@@ -209,36 +209,28 @@ class S4DLayer(tf.keras.layers.Layer):
         super().build(input_shape)
 
     def call(self, tokens):
-        dt = tf.cast(tf.exp(self.log_dt), tf.complex64)
-        real = -tf.exp(self.log_A_real)
-        imag = tf.broadcast_to(self.A_imag[None, :], tf.shape(real))
-        A = tf.complex(real, imag)
-        B = tf.complex(self.B_real, self.B_imag)
-        C = tf.complex(self.C_real, self.C_imag)
-        a_bar = (1.0 + dt * A / 2.0) / (1.0 - dt * A / 2.0)
-        b_bar = dt * B / (1.0 - dt * A / 2.0)
-        series = tf.transpose(tokens, [1, 0, 2])
+        n = self.n_state
+        eye = tf.eye(n)
+        a_eff = self.A + tf.linalg.diag(self.delta_diag)            # (n, n)
+        dt = tf.exp(self.log_dt)                                     # (D,)
+        half = 0.5 * dt[:, None, None] * a_eff[None, :, :]           # (D, n, n)
+        lhs = eye[None, :, :] - half
+        a_bar = tf.linalg.solve(lhs, eye[None, :, :] + half)         # (D, n, n)
+        b_bar = tf.linalg.solve(lhs, (dt[:, None] * self.B)[:, :, None])[:, :, 0]  # (D, n)
+        series = tf.transpose(tokens, [1, 0, 2])                     # (T, B, D)
 
-    def get_config(self):
-        config = super().get_config()
-        config.update(d_model=self.d_model, n_complex=self.n_complex)
-        return config
+        def step(h_prev, x_t):                                       # h: (B, D, n)
+            return tf.einsum('dij,bdj->bdi', a_bar, h_prev) + b_bar[None] * x_t[:, :, None]
 
-
-
-        def step(h_prev, x_t):
-            x_c = tf.cast(x_t, tf.complex64)[:, :, None]
-            return a_bar[None, :, :] * h_prev + b_bar[None, :, :] * x_c
-
-        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, self.n_complex), dtype=tf.complex64)
-        states = tf.scan(step, series, initializer=h0)
-        y = 2.0 * tf.math.real(tf.reduce_sum(tf.math.conj(C)[None, None, :, :] * states, axis=-1))
+        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, n))
+        states = tf.scan(step, series, initializer=h0)               # (T, B, D, n)
+        y = tf.reduce_sum(self.C[None, None] * states, axis=-1)      # (T, B, D)
         return self.out(tf.transpose(y, [1, 0, 2]))[:, -1, :]
+
     def get_config(self):
         config = super().get_config()
-        config.update(d_model=self.d_model, n_complex=self.n_complex)
+        config.update(d_model=self.d_model, n_state=self.n_state)
         return config
-
 
 def _inv_softplus(values):
     return np.log(np.exp(np.asarray(values, dtype=np.float32)) - 1.0).astype(np.float32)
@@ -543,6 +535,135 @@ def _apply_shared_visual_front(maps, visual_norm, capacity, percentile_scale):
         print(f"[temporal] input_reduce 1x1 -> {int(cap['input_reduce'])}")
     return maps
 
+BRANCH_KINDS = ('lstm', 'transformer', 's4', 's4d', 'mamba')
+
+
+def build_visual_context(encoder_name, encoder_in, vgg_shape=(7, 7, 512), d_model=128,
+                         convlstm_filters=64, convlstm_kernel=2, n_state=16, num_heads=4,
+                         num_layers=2, ff_mult=4, mimo_rank=4, dropout=0.4,
+                         recurrent_dropout=0.2, recurrent_activation='hard_sigmoid',
+                         l2_value=0.001):
+    """(B, T, 7, 7, 512) -> (B, W). Visual temporal block, shared by build_pie_temporal_model
+    and the branchattn path of feature_routing."""
+    if encoder_name not in ALL_ENCODER_INFO:
+        raise ValueError(encoder_name)
+    if encoder_name in FACTORIZED_ENCODER_INFO:
+        grid = Dropout(dropout, noise_shape=(None, 1) + tuple(vgg_shape),
+                       name='locked_input_dropout')(encoder_in)
+        grid = TimeDistributed(
+            Conv2D(convlstm_filters, convlstm_kernel, padding='same', activation='relu',
+                   kernel_regularizer=_l2(l2_value)),
+            name='spatial_conv')(grid)
+        grid = PerPositionTemporal(
+            encoder_name[len(FACTORIZED_PREFIX):], d_model=convlstm_filters,
+            num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
+            n_state=n_state, dropout=dropout, recurrent_dropout=recurrent_dropout,
+            recurrent_activation=recurrent_activation, l2_value=l2_value,
+            name='per_position_temporal')(grid)
+        return Flatten(name='encoder_flatten')(grid)
+    if encoder_name == 'convlstm2d':
+        conv = ConvLSTM2D(
+            filters=convlstm_filters, kernel_size=convlstm_kernel, padding='same',
+            return_sequences=False, dropout=dropout, recurrent_dropout=recurrent_dropout,
+            kernel_regularizer=_l2(l2_value), recurrent_regularizer=_l2(l2_value),
+            bias_regularizer=_l2(l2_value), name='conv_lstm2d')(encoder_in)
+        return Flatten(name='encoder_flatten')(conv)
+    if encoder_name == 'convlstm':
+        return MatchedConvLSTM(
+            d_model, filters=convlstm_filters, kernel=convlstm_kernel,
+            dropout=dropout, recurrent_dropout=recurrent_dropout,
+            l2_value=l2_value)(encoder_in)
+    tokens = SpatialStem(d_model, l2_value=l2_value)(encoder_in)
+    if encoder_name == 'transformer':
+        return TemporalTransformer(
+            d_model, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
+            dropout=min(float(dropout), 0.1), l2_value=l2_value, causal=True)(tokens)
+    if encoder_name == 's4':
+        return S4Layer(d_model, n_state=n_state)(tokens)
+    if encoder_name == 's4d':
+        return S4DLayer(d_model, n_complex=n_state)(tokens)
+    sequence = tokens
+    if encoder_name == 'mamba':
+        for _ in range(int(num_layers)):
+            sequence = MambaBlock(d_model, n_state=n_state)(sequence)
+        return LastStep()(sequence)
+    for _ in range(int(num_layers)):
+        sequence = Mamba3Block(
+            d_model, n_heads=num_heads, n_state=n_state, mimo_rank=mimo_rank)(sequence)
+    return LastStep()(sequence)
+
+
+def make_sequence_branch(kind, feat, seq_in, units, lstm_kw, hp=None,
+                         dropout=0.4, l2_value=0.0, attention=False):
+    """(B, T, D) -> (B, units) for one decoder branch.
+    'lstm' is the original branch (layer names unchanged, old checkpoints still load).
+    Other kinds: per-step Dense(units), then the block, last step as the summary.
+    attention=True is honoured only for 'lstm' (AdditiveTemporalAttention over all steps)."""
+    hp = dict(hp or {})
+    if kind == 'lstm':
+        out = LSTM(name=f'branch_{feat}', return_sequences=attention, **lstm_kw)(seq_in)
+        if attention:
+            from feature_routing import AdditiveTemporalAttention
+            out = AdditiveTemporalAttention(name=f'tattn_{feat}')(out)
+        return out
+    if kind not in BRANCH_KINDS:
+        raise ValueError(f'unknown branch temporal kind: {kind!r}')
+    n_state = int(hp.get('n_state', 16))
+    n_layers = int(hp.get('num_layers', 1))
+    x = Dense(units, kernel_regularizer=_l2(l2_value), name=f'bin_{feat}')(seq_in)
+    if kind == 'transformer':
+        return TemporalTransformer(
+            units, num_heads=int(hp.get('num_heads', 4)), num_layers=n_layers,
+            ff_mult=int(hp.get('ff_mult', 4)), dropout=min(float(dropout), 0.1),
+            l2_value=l2_value, causal=True, name=f'bblock_{feat}')(x)
+    if kind == 's4':
+        return S4Layer(units, n_state=n_state, name=f'bblock_{feat}')(x)
+    if kind == 's4d':
+        return S4DLayer(units, n_complex=n_state, name=f'bblock_{feat}')(x)
+    for k in range(n_layers):
+        x = MambaBlock(units, n_state=n_state, name=f'bblock_{feat}_{k}')(x)
+    return LastStep(name=f'blast_{feat}')(x)
+
+
+def choose_branch_temporal_for_menu(opts):
+    """branchattn only. Writes branch_visual_encoder/_hp, branch_temporal_kind/_hp, branch_tag."""
+    print('\n--- branchattn: temporal block of the VISUAL encoder ---')
+    print('    Enter twice keeps convlstm2d (PIE reference path, graph unchanged).')
+    strategy = interactive_pick_temporal_strategy()
+    vis = interactive_pick_temporal_encoder(strategy, default=None)
+    vis_hp = {} if vis == 'convlstm2d' else interactive_pick_temporal_hyperparams(vis)
+    if strategy == 'factorized':
+        _print_factorized_cost(vis, opts)
+
+    kind, kind_hp = 'lstm', {}
+    if opts.get('branch_mode') == 'temporal_concat':
+        print('[branch] temporal_concat has one LSTM and no branches: branch kind fixed to lstm.')
+    else:
+        print('\n--- branchattn: temporal block of each decoder BRANCH ---')
+        print('    core LSTM of core_plus_extras stays LSTM (control).')
+        for i, k in enumerate(BRANCH_KINDS, 1):
+            print(f'  {i}. {k}{" *" if k == "lstm" else ""}')
+        raw = input(f'Select [1-{len(BRANCH_KINDS)}] (default lstm): ').strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(BRANCH_KINDS):
+            kind = BRANCH_KINDS[int(raw) - 1]
+        if kind == 'transformer':
+            kind_hp = {'num_heads': _ask_int('num_heads', 4), 'num_layers': _ask_int('num_layers', 1),
+                       'ff_mult': _ask_int('ff_mult', 4)}
+        elif kind in ('s4', 's4d'):
+            kind_hp = {'n_state': _ask_int('n_state', 16)}
+        elif kind == 'mamba':
+            kind_hp = {'n_state': _ask_int('n_state', 16), 'num_layers': _ask_int('num_layers', 1)}
+
+    opts['branch_visual_encoder'] = vis
+    opts['branch_visual_hp'] = vis_hp
+    opts['branch_temporal_kind'] = kind
+    opts['branch_temporal_hp'] = kind_hp
+    parts = ([] if vis == 'convlstm2d' else [vis]) + ([] if kind == 'lstm' else [f'b{kind}'])
+    opts['branch_tag'] = '_'.join(parts) or None
+    print(f"[config] BRANCH_VISUAL_ENCODER = {vis} {vis_hp}")
+    print(f"[config] BRANCH_TEMPORAL_KIND  = {kind} {kind_hp}")
+    return opts
+
 def build_pie_temporal_model(encoder_name,
                              seq_len=15,
                              vgg_shape=(7, 7, 512),
@@ -585,64 +706,14 @@ def build_pie_temporal_model(encoder_name,
     print("[temporal] padding stays SAME for convlstm2d and convfact_*. "
           "feature_routing pie stays VALID. Do not compare their AUC as the same ConvLSTM.")
 
-    if encoder_name in FACTORIZED_ENCODER_INFO:
-        grid = Dropout(dropout, noise_shape=(None, 1) + spatial,
-                       name='locked_input_dropout')(maps)
-        grid = TimeDistributed(
-            Conv2D(convlstm_filters, convlstm_kernel, padding='same', activation='relu',
-                   kernel_regularizer=_l2(l2_value)),
-            name='spatial_conv')(grid)
-        grid = PerPositionTemporal(
-            encoder_name[len(FACTORIZED_PREFIX):], d_model=convlstm_filters,
-            num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
-            n_state=n_state, dropout=dropout, recurrent_dropout=recurrent_dropout,
-            recurrent_activation=recurrent_activation, l2_value=l2_value,
-            name='per_position_temporal')(grid)
-        if cap.get('encoder_reduce'):
-            grid = Conv2D(int(cap['encoder_reduce']), 1, name='encoder_reduce')(grid)
-            print(f"[temporal] encoder_reduce 1x1 -> {int(cap['encoder_reduce'])}")
-        context = Flatten(name='encoder_flatten')(grid)
-    elif encoder_name == 'convlstm2d':
-        conv = ConvLSTM2D(
-            filters=convlstm_filters, kernel_size=convlstm_kernel, padding='same',
-            return_sequences=False, dropout=dropout, recurrent_dropout=recurrent_dropout,
-            kernel_regularizer=_l2(l2_value), recurrent_regularizer=_l2(l2_value),
-            bias_regularizer=_l2(l2_value), name='conv_lstm2d')(maps)
-        if cap.get('encoder_reduce'):
-            conv = Conv2D(int(cap['encoder_reduce']), 1, name='encoder_reduce')(conv)
-            print(f"[temporal] encoder_reduce 1x1 -> {int(cap['encoder_reduce'])}")
-        context = Flatten(name='encoder_flatten')(conv)
-    elif encoder_name == 'convlstm':
-        if cap.get('encoder_reduce'):
-            print("[temporal] encoder_reduce skipped: matched convlstm pools each frame.")
-        context = MatchedConvLSTM(
-            d_model, filters=convlstm_filters, kernel=convlstm_kernel,
-            dropout=dropout, recurrent_dropout=recurrent_dropout,
-            l2_value=l2_value)(maps)
-    else:
-        if cap.get('encoder_reduce'):
-            print("[temporal] encoder_reduce skipped: SpatialStem already collapses 7x7.")
-        tokens = SpatialStem(d_model, l2_value=l2_value)(maps)
-        if encoder_name == 'transformer':
-            context = TemporalTransformer(
-                d_model, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
-                dropout=min(float(dropout), 0.1), l2_value=l2_value, causal=True)(tokens)
-        elif encoder_name == 's4':
-            context = S4Layer(d_model, n_state=n_state)(tokens)
-        elif encoder_name == 's4d':
-            context = S4DLayer(d_model, n_complex=n_state)(tokens)
-        elif encoder_name == 'mamba':
-            sequence = tokens
-            for _ in range(int(num_layers)):
-                sequence = MambaBlock(d_model, n_state=n_state)(sequence)
-            context = LastStep()(sequence)
-        else:
-            sequence = tokens
-            for _ in range(int(num_layers)):
-                sequence = Mamba3Block(
-                    d_model, n_heads=num_heads, n_state=n_state, mimo_rank=mimo_rank)(sequence)
-            context = LastStep()(sequence)
+    context = build_visual_context(
+        encoder_name, encoder_in, vgg_shape=vgg_shape, d_model=d_model,
+        convlstm_filters=convlstm_filters, convlstm_kernel=convlstm_kernel,
+        n_state=n_state, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
+        mimo_rank=mimo_rank, dropout=dropout, recurrent_dropout=recurrent_dropout,
+        recurrent_activation=recurrent_activation, l2_value=l2_value)
 
+    repeated = RepeatVector(seq_len, name='repeat_context')(context)
     lstm_kw = dict(
         units=lstm_units, dropout=dropout, recurrent_dropout=recurrent_dropout,
         activation='tanh', recurrent_activation=recurrent_activation,
@@ -971,6 +1042,108 @@ def choose_temporal_for_menu(opts, default='convlstm2d'):
     opts['temporal_fusion'] = interactive_pick_temporal_fusion(
         default=opts.get('temporal_fusion') or 'pie_concat')
     print(f"[config] TEMPORAL_FUSION = {opts['temporal_fusion']}")
+    return opts
+
+BRANCH_KINDS = ('lstm', 'transformer', 's4', 's4d', 'mamba')
+
+
+def build_visual_context(encoder_name, maps, d_model=128, convlstm_filters=64,
+                         convlstm_kernel=2, n_state=16, num_heads=4, num_layers=2,
+                         ff_mult=4, mimo_rank=4, dropout=0.4, recurrent_dropout=0.2,
+                         recurrent_activation='sigmoid', l2_value=0.001):
+    """(B, T, H, W, C) -> (B, W) for the branchattn graph.
+    'convlstm2d' is not handled here: feature_routing keeps its own valid-padding ConvLSTM2D."""
+    if encoder_name == 'convlstm2d' or encoder_name not in ALL_ENCODER_INFO:
+        raise ValueError(f'build_visual_context: unsupported encoder {encoder_name!r}')
+    spatial = tuple(int(d) for d in maps.shape[2:])
+    if encoder_name in FACTORIZED_ENCODER_INFO:
+        grid = Dropout(dropout, noise_shape=(None, 1) + spatial,
+                       name='locked_input_dropout')(maps)
+        grid = TimeDistributed(
+            Conv2D(convlstm_filters, convlstm_kernel, padding='same', activation='relu',
+                   kernel_regularizer=_l2(l2_value)),
+            name='spatial_conv')(grid)
+        grid = PerPositionTemporal(
+            encoder_name[len(FACTORIZED_PREFIX):], d_model=convlstm_filters,
+            num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
+            n_state=n_state, dropout=dropout, recurrent_dropout=recurrent_dropout,
+            recurrent_activation=recurrent_activation, l2_value=l2_value,
+            name='per_position_temporal')(grid)
+        return Flatten(name='encoder_flatten')(grid)
+    if encoder_name == 'convlstm':
+        return MatchedConvLSTM(
+            d_model, filters=convlstm_filters, kernel=convlstm_kernel,
+            dropout=dropout, recurrent_dropout=recurrent_dropout,
+            l2_value=l2_value)(maps)
+    tokens = SpatialStem(d_model, l2_value=l2_value)(maps)
+    if encoder_name == 'transformer':
+        return TemporalTransformer(
+            d_model, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
+            dropout=min(float(dropout), 0.1), l2_value=l2_value, causal=True)(tokens)
+    if encoder_name == 's4':
+        return S4Layer(d_model, n_state=n_state)(tokens)
+    if encoder_name == 's4d':
+        return S4DLayer(d_model, n_complex=n_state)(tokens)
+    sequence = tokens
+    for _ in range(int(num_layers)):
+        if encoder_name == 'mamba':
+            sequence = MambaBlock(d_model, n_state=n_state)(sequence)
+        else:
+            sequence = Mamba3Block(
+                d_model, n_heads=num_heads, n_state=n_state, mimo_rank=mimo_rank)(sequence)
+    return LastStep()(sequence)
+
+
+def _ask_yes_no(prompt, default=False):
+    raw = input(f"{prompt} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
+    return default if raw == '' else raw in ('y', 'yes')
+
+
+def choose_branch_temporal_for_menu(opts, batch_size=None):
+    """branchattn / branchattn_temporal only. Enter at every question keeps the original graph."""
+    vis, vis_hp, kind, kind_hp = None, {}, 'lstm', {}
+
+    print('\n--- branchattn: temporal block of the VISUAL encoder ---')
+    print('    Default: the original ConvLSTM2D of this graph (padding valid).')
+    if _ask_yes_no('[branch] replace the visual temporal block?'):
+        strategy = interactive_pick_temporal_strategy()
+        name = interactive_pick_temporal_encoder(strategy, default=None)
+        if name != 'convlstm2d':
+            vis = name
+            vis_hp = interactive_pick_temporal_hyperparams(name)
+            if strategy == 'factorized':
+                _print_factorized_cost(name, {'batch_size': batch_size})
+
+    if opts.get('branch_mode') == 'temporal_concat':
+        print('[branch] temporal_concat = one LSTM, no branches: no BranchAttnPool, no aux heads, '
+              'no attention_log.json. Pick static_pool or core_plus_extras to get them.')
+    else:
+        print('\n--- branchattn: temporal block of each decoder BRANCH ---')
+        print('    The core LSTM of core_plus_extras always stays an LSTM (control).')
+        if _ask_yes_no('[branch] replace the per-branch LSTM?'):
+            for i, k in enumerate(BRANCH_KINDS, 1):
+                print(f'  {i}. {k}{" *" if k == "lstm" else ""}')
+            raw = input(f'Select [1-{len(BRANCH_KINDS)}] (default lstm): ').strip()
+            if raw.isdigit() and 1 <= int(raw) <= len(BRANCH_KINDS):
+                kind = BRANCH_KINDS[int(raw) - 1]
+            if kind == 'transformer':
+                kind_hp = {'num_heads': _ask_int('num_heads', 4),
+                           'num_layers': _ask_int('num_layers', 1),
+                           'ff_mult': _ask_int('ff_mult', 4)}
+            elif kind in ('s4', 's4d'):
+                kind_hp = {'n_state': _ask_int('n_state', 16)}
+            elif kind == 'mamba':
+                kind_hp = {'n_state': _ask_int('n_state', 16),
+                           'num_layers': _ask_int('num_layers', 1)}
+
+    opts['branch_visual_encoder'] = vis
+    opts['branch_visual_hp'] = vis_hp
+    opts['branch_temporal_kind'] = kind
+    opts['branch_temporal_hp'] = kind_hp
+    parts = ([vis] if vis else []) + ([] if kind == 'lstm' else [f'b{kind}'])
+    opts['branch_tag'] = '_'.join(parts) or None
+    print(f"[config] BRANCH_VISUAL_ENCODER = {vis or 'convlstm2d (original)'} {vis_hp}")
+    print(f"[config] BRANCH_TEMPORAL_KIND  = {kind} {kind_hp}")
     return opts
 
 def build_from_run_opts(opts, seq_len, decoder_dim, lstm_units, dropout,

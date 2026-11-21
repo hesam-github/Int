@@ -127,9 +127,13 @@ def pick_run_options(hp):
     print(f"[config] ARCHITECTURE = {opts['architecture']}")
 
     opts['branch_mode'] = None
+    opts.update(branch_visual_encoder=None, branch_visual_hp={},
+                branch_temporal_kind=None, branch_temporal_hp={}, branch_tag=None)
     if opts['architecture'] in ('branchattn', 'branchattn_temporal'):
         opts['branch_mode'] = interactive_pick_branch_mode()
         print(f"[config] BRANCH_MODE = {opts['branch_mode']}")
+        from temporal_encoders import choose_branch_temporal_for_menu
+        choose_branch_temporal_for_menu(opts, batch_size=hp['batch_size'])
 
     opts['temporal_encoder'] = None
     opts['temporal_hp'] = {}
@@ -484,8 +488,8 @@ def choose_run_identity(opts, data, hp, pie_path):
     if aux_applies:
         opts['aux_loss_weight'] = interactive_pick_aux_loss()
     else:
-        print("[config] AUX_LOSS_WEIGHT = 0. This graph does not build aux heads. "
-              "pcpa, temporal_concat, pie, and option 8 do not.")
+        print("[config] AUX_LOSS_WEIGHT = 0. No aux heads: pie, option 8 and "
+              "branch_mode=temporal_concat have no branches to attach them to.")
     print(f"[config] AUX_LOSS_WEIGHT = {opts['aux_loss_weight']}")
 
     if use_visual and 'bbox_branch' in decoder_features and opts['fusion'] == 'pie':
@@ -541,7 +545,8 @@ def choose_run_identity(opts, data, hp, pie_path):
 
     short_tag = build_short_run_tag(
         opts['fusion'], opts['feature_target'], decoder_features,
-        opts['split_type'], split_tag, temporal_encoder=opts.get('temporal_encoder'))
+        opts['split_type'], split_tag,
+        temporal_encoder=opts.get('temporal_encoder') or opts.get('branch_tag'))
     if not use_visual:
         short_tag = 'NoVis_' + short_tag.replace('_context', '', 1)
 
@@ -626,6 +631,10 @@ def start_run(opts, hp, data, ident, pie_path):
         ('lstm_rec_dropout', hp['lstm_recurrent_dropout']),
         ('lstm_rec_activation', opts['rec_act']),
         ('branch_mode', opts.get('branch_mode')),
+        ('branch_visual_encoder', opts.get('branch_visual_encoder')),
+        ('branch_temporal_kind', opts.get('branch_temporal_kind')),
+        ('branch_visual_hp', opts.get('branch_visual_hp')),
+        ('branch_temporal_hp', opts.get('branch_temporal_hp')),
         ('aux_loss_weight', opts.get('aux_loss_weight', 0.0))])
     sec_opt = _print_section('optimizer/training hyperparams', [
         ('lr', hp['lr']),
@@ -697,6 +706,10 @@ def start_run(opts, hp, data, ident, pie_path):
     model.feature_target = opts.get('feature_target', 'decoder')
     model.fusion = opts.get('fusion', 'pie')
     model.branch_mode = opts.get('branch_mode')  # None for non-branch architectures
+    model.branch_temporal_kind = opts.get('branch_temporal_kind')
+    model.branch_temporal_hp = opts.get('branch_temporal_hp') or {}
+    model.branch_visual_encoder = opts.get('branch_visual_encoder')
+    model.branch_visual_hp = opts.get('branch_visual_hp') or {}
     model.aux_loss_weight = float(opts.get('aux_loss_weight', 0.0) or 0.0)
     model.temporal_fusion = opts.get('temporal_fusion', 'pie_concat')
     model.extra_norm = opts.get('extra_norm', 'none')

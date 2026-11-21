@@ -77,9 +77,9 @@ def interactive_pick_branch_mode(default='static_pool'):
     """Sub-menu for branchattn and branchattn_temporal. Does not change other architectures."""
     modes = ['static_pool', 'temporal_concat', 'core_plus_extras']
     print('\n--- Branch fusion ---')
-    print('  1. static_pool *     current: Dense(visual) + one LSTM per column + BranchAttnPool')
-    print('  2. temporal_concat   PIE graph: RepeatVector(Flatten) + whole decoder + one LSTM')
-    print('  3. core_plus_extras  PIE core on bbox only; each extra column gets its own LSTM')
+    print(' 1. static_pool       * default: Dense(visual) + one LSTM per column + BranchAttnPool [aux + attn log]')
+    print(' 2. temporal_concat   PIE graph, ONE LSTM, no branches [NO aux, NO attn log]')
+    print(' 3. core_plus_extras  PIE core on bbox only; one LSTM per extra column [aux + attn log, needs >=1 extra feature]')
     raw = input(f'Select [1-3] (default {default}): ').strip()
     if not raw:
         return default
