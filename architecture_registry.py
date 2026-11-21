@@ -94,7 +94,7 @@ def interactive_pick_branch_mode(default='static_pool'):
     
 def interactive_pick_aux_loss(default=0.0):
     """Total weight of the per-branch auxiliary losses. 0 = off (single loss, as before)."""
-    print('\n--- Auxiliary per-branch loss (branchattn: static_pool / core_plus_extras) ---')
+    print('\n--- Auxiliary per-branch loss (any multi-branch architecture) ---')
     print('  0   off (only the loss on the fused output)  <-- default')
     print('  >0  every branch gets its own sigmoid head; the TOTAL aux weight is split equally')
     print('      between the heads (main loss weight stays 1.0). Try 0.25 / 0.5 / 1.0.')

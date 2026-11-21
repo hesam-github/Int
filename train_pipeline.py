@@ -479,8 +479,8 @@ def choose_run_identity(opts, data, hp, pie_path):
               "decoder input. For a PARALLEL bbox branch choose branchattn or branchattn_temporal.")
 
     opts['aux_loss_weight'] = 0.0
-    aux_applies = (arch_name in ('branchattn', 'branchattn_temporal')
-                   and opts.get('branch_mode') in ('static_pool', 'core_plus_extras'))
+    aux_applies = (arch_name in ('branchattn', 'branchattn_temporal', 'pcpa')
+                   and opts.get('branch_mode') in ('static_pool', 'core_plus_extras', None))
     if aux_applies:
         opts['aux_loss_weight'] = interactive_pick_aux_loss()
     else:
