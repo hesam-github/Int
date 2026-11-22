@@ -154,26 +154,26 @@ class S4Layer(tf.keras.layers.Layer):
     def call(self, tokens):
         n = self.n_state
         eye = tf.eye(n)
-        a_eff = self.A + tf.linalg.diag(self.delta_diag)            # (n, n)
-        dt = tf.exp(self.log_dt)                                     # (D,)
-        half = 0.5 * dt[:, None, None] * a_eff[None, :, :]           # (D, n, n)
+        a_eff = self.A + tf.linalg.diag(self.delta_diag)                 # (n, n)
+        dt = tf.exp(self.log_dt)                                         # (D,)
+        half = 0.5 * dt[:, None, None] * a_eff[None, :, :]               # (D, n, n)
         lhs = eye[None, :, :] - half
-        a_bar = tf.linalg.solve(lhs, eye[None, :, :] + half)         # (D, n, n)
+        a_bar = tf.linalg.solve(lhs, eye[None, :, :] + half)             # (D, n, n)
         b_bar = tf.linalg.solve(lhs, (dt[:, None] * self.B)[:, :, None])[:, :, 0]  # (D, n)
-        series = tf.transpose(tokens, [1, 0, 2])
+        series = tf.transpose(tokens, [1, 0, 2])                         # (T, B, D)
 
-        def step(h_prev, x_t):
-            x_c = tf.cast(x_t, tf.complex64)[:, :, None]
-            return a_bar[None, :, :] * h_prev + b_bar[None, :, :] * x_c
+        def step(h_prev, x_t):                                           # h: (B, D, n)
+            h = tf.einsum('dij,bdj->bdi', a_bar, h_prev)
+            return h + b_bar[None] * x_t[:, :, None]
 
-        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, self.n_complex), dtype=tf.complex64)
-        states = tf.scan(step, series, initializer=h0)
-        y = 2.0 * tf.math.real(tf.reduce_sum(tf.math.conj(C)[None, None, :, :] * states, axis=-1))
+        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, n))
+        states = tf.scan(step, series, initializer=h0)                   # (T, B, D, n)
+        y = tf.reduce_sum(self.C[None, None] * states, axis=-1)          # (T, B, D)
         return self.out(tf.transpose(y, [1, 0, 2]))[:, -1, :]
 
     def get_config(self):
         config = super().get_config()
-        config.update(d_model=self.d_model, n_complex=self.n_complex)
+        config.update(d_model=self.d_model, n_state=self.n_state)
         return config
 
 
@@ -209,27 +209,28 @@ class S4DLayer(tf.keras.layers.Layer):
         super().build(input_shape)
 
     def call(self, tokens):
-        n = self.n_state
-        eye = tf.eye(n)
-        a_eff = self.A + tf.linalg.diag(self.delta_diag)            # (n, n)
-        dt = tf.exp(self.log_dt)                                     # (D,)
-        half = 0.5 * dt[:, None, None] * a_eff[None, :, :]           # (D, n, n)
-        lhs = eye[None, :, :] - half
-        a_bar = tf.linalg.solve(lhs, eye[None, :, :] + half)         # (D, n, n)
-        b_bar = tf.linalg.solve(lhs, (dt[:, None] * self.B)[:, :, None])[:, :, 0]  # (D, n)
-        series = tf.transpose(tokens, [1, 0, 2])                     # (T, B, D)
+        dt = tf.cast(tf.exp(self.log_dt), tf.complex64)                  # (D, 1)
+        real = -tf.exp(self.log_A_real)                                  # (D, n)
+        imag = tf.broadcast_to(self.A_imag[None, :], tf.shape(real))
+        A = tf.complex(real, imag)
+        B = tf.complex(self.B_real, self.B_imag)
+        C = tf.complex(self.C_real, self.C_imag)
+        a_bar = (1.0 + dt * A / 2.0) / (1.0 - dt * A / 2.0)              # (D, n)
+        b_bar = dt * B / (1.0 - dt * A / 2.0)                            # (D, n)
+        series = tf.transpose(tokens, [1, 0, 2])                         # (T, B, D)
 
-        def step(h_prev, x_t):                                       # h: (B, D, n)
-            return tf.einsum('dij,bdj->bdi', a_bar, h_prev) + b_bar[None] * x_t[:, :, None]
+        def step(h_prev, x_t):                                           # h: (B, D, n)
+            x_c = tf.cast(x_t, tf.complex64)[:, :, None]
+            return a_bar[None] * h_prev + b_bar[None] * x_c
 
-        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, n))
-        states = tf.scan(step, series, initializer=h0)               # (T, B, D, n)
-        y = tf.reduce_sum(self.C[None, None] * states, axis=-1)      # (T, B, D)
+        h0 = tf.zeros((tf.shape(tokens)[0], self.d_model, self.n_complex), dtype=tf.complex64)
+        states = tf.scan(step, series, initializer=h0)                   # (T, B, D, n)
+        y = 2.0 * tf.math.real(tf.reduce_sum(tf.math.conj(C)[None, None] * states, axis=-1))
         return self.out(tf.transpose(y, [1, 0, 2]))[:, -1, :]
 
     def get_config(self):
         config = super().get_config()
-        config.update(d_model=self.d_model, n_state=self.n_state)
+        config.update(d_model=self.d_model, n_complex=self.n_complex)
         return config
 
 def _inv_softplus(values):
@@ -538,18 +539,19 @@ def _apply_shared_visual_front(maps, visual_norm, capacity, percentile_scale):
 BRANCH_KINDS = ('lstm', 'transformer', 's4', 's4d', 'mamba')
 
 
-def build_visual_context(encoder_name, encoder_in, vgg_shape=(7, 7, 512), d_model=128,
-                         convlstm_filters=64, convlstm_kernel=2, n_state=16, num_heads=4,
-                         num_layers=2, ff_mult=4, mimo_rank=4, dropout=0.4,
-                         recurrent_dropout=0.2, recurrent_activation='hard_sigmoid',
-                         l2_value=0.001):
-    """(B, T, 7, 7, 512) -> (B, W). Visual temporal block, shared by build_pie_temporal_model
-    and the branchattn path of feature_routing."""
+def build_visual_context(encoder_name, maps, vgg_shape=None, d_model=128,
+                         convlstm_filters=64, convlstm_kernel=2, n_state=16,
+                         num_heads=4, num_layers=2, ff_mult=4, mimo_rank=4,
+                         dropout=0.4, recurrent_dropout=0.2,
+                         recurrent_activation='hard_sigmoid', l2_value=0.001):
+    """(B, T, H, W, C) -> (B, W). vgg_shape is accepted for old callers and ignored:
+    the grid size is read from `maps`, so it stays correct after input_reduce."""
     if encoder_name not in ALL_ENCODER_INFO:
         raise ValueError(encoder_name)
+    spatial = tuple(int(d) for d in maps.shape[2:])
     if encoder_name in FACTORIZED_ENCODER_INFO:
-        grid = Dropout(dropout, noise_shape=(None, 1) + tuple(vgg_shape),
-                       name='locked_input_dropout')(encoder_in)
+        grid = Dropout(dropout, noise_shape=(None, 1) + spatial,
+                       name='locked_input_dropout')(maps)
         grid = TimeDistributed(
             Conv2D(convlstm_filters, convlstm_kernel, padding='same', activation='relu',
                    kernel_regularizer=_l2(l2_value)),
@@ -566,14 +568,14 @@ def build_visual_context(encoder_name, encoder_in, vgg_shape=(7, 7, 512), d_mode
             filters=convlstm_filters, kernel_size=convlstm_kernel, padding='same',
             return_sequences=False, dropout=dropout, recurrent_dropout=recurrent_dropout,
             kernel_regularizer=_l2(l2_value), recurrent_regularizer=_l2(l2_value),
-            bias_regularizer=_l2(l2_value), name='conv_lstm2d')(encoder_in)
+            bias_regularizer=_l2(l2_value), name='conv_lstm2d')(maps)
         return Flatten(name='encoder_flatten')(conv)
     if encoder_name == 'convlstm':
         return MatchedConvLSTM(
             d_model, filters=convlstm_filters, kernel=convlstm_kernel,
             dropout=dropout, recurrent_dropout=recurrent_dropout,
-            l2_value=l2_value)(encoder_in)
-    tokens = SpatialStem(d_model, l2_value=l2_value)(encoder_in)
+            l2_value=l2_value)(maps)
+    tokens = SpatialStem(d_model, l2_value=l2_value)(maps)
     if encoder_name == 'transformer':
         return TemporalTransformer(
             d_model, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
@@ -591,7 +593,6 @@ def build_visual_context(encoder_name, encoder_in, vgg_shape=(7, 7, 512), d_mode
         sequence = Mamba3Block(
             d_model, n_heads=num_heads, n_state=n_state, mimo_rank=mimo_rank)(sequence)
     return LastStep()(sequence)
-
 
 def make_sequence_branch(kind, feat, seq_in, units, lstm_kw, hp=None,
                          dropout=0.4, l2_value=0.0, attention=False):
@@ -1047,51 +1048,6 @@ def choose_temporal_for_menu(opts, default='convlstm2d'):
 BRANCH_KINDS = ('lstm', 'transformer', 's4', 's4d', 'mamba')
 
 
-def build_visual_context(encoder_name, maps, d_model=128, convlstm_filters=64,
-                         convlstm_kernel=2, n_state=16, num_heads=4, num_layers=2,
-                         ff_mult=4, mimo_rank=4, dropout=0.4, recurrent_dropout=0.2,
-                         recurrent_activation='sigmoid', l2_value=0.001):
-    """(B, T, H, W, C) -> (B, W) for the branchattn graph.
-    'convlstm2d' is not handled here: feature_routing keeps its own valid-padding ConvLSTM2D."""
-    if encoder_name == 'convlstm2d' or encoder_name not in ALL_ENCODER_INFO:
-        raise ValueError(f'build_visual_context: unsupported encoder {encoder_name!r}')
-    spatial = tuple(int(d) for d in maps.shape[2:])
-    if encoder_name in FACTORIZED_ENCODER_INFO:
-        grid = Dropout(dropout, noise_shape=(None, 1) + spatial,
-                       name='locked_input_dropout')(maps)
-        grid = TimeDistributed(
-            Conv2D(convlstm_filters, convlstm_kernel, padding='same', activation='relu',
-                   kernel_regularizer=_l2(l2_value)),
-            name='spatial_conv')(grid)
-        grid = PerPositionTemporal(
-            encoder_name[len(FACTORIZED_PREFIX):], d_model=convlstm_filters,
-            num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
-            n_state=n_state, dropout=dropout, recurrent_dropout=recurrent_dropout,
-            recurrent_activation=recurrent_activation, l2_value=l2_value,
-            name='per_position_temporal')(grid)
-        return Flatten(name='encoder_flatten')(grid)
-    if encoder_name == 'convlstm':
-        return MatchedConvLSTM(
-            d_model, filters=convlstm_filters, kernel=convlstm_kernel,
-            dropout=dropout, recurrent_dropout=recurrent_dropout,
-            l2_value=l2_value)(maps)
-    tokens = SpatialStem(d_model, l2_value=l2_value)(maps)
-    if encoder_name == 'transformer':
-        return TemporalTransformer(
-            d_model, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
-            dropout=min(float(dropout), 0.1), l2_value=l2_value, causal=True)(tokens)
-    if encoder_name == 's4':
-        return S4Layer(d_model, n_state=n_state)(tokens)
-    if encoder_name == 's4d':
-        return S4DLayer(d_model, n_complex=n_state)(tokens)
-    sequence = tokens
-    for _ in range(int(num_layers)):
-        if encoder_name == 'mamba':
-            sequence = MambaBlock(d_model, n_state=n_state)(sequence)
-        else:
-            sequence = Mamba3Block(
-                d_model, n_heads=num_heads, n_state=n_state, mimo_rank=mimo_rank)(sequence)
-    return LastStep()(sequence)
 
 
 def _ask_yes_no(prompt, default=False):

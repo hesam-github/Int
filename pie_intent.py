@@ -1006,7 +1006,7 @@ class PIEIntent(object):
                             parts.append(f"total={total:.4f}")
                         main = logs.get(f"{prefix}decoder_dense_loss")
                         if main is not None:
-                            parts.append(f"main(wBCE+focal)={main:.4f}")
+                            parts.append(f"main={main:.4f}")
                         for k, v in sorted(logs.items()):
                             if k.startswith(f"{prefix}aux_") and k.endswith("_loss") and isinstance(v, (int, float)):
                                 name = k[len(prefix):-5]  # remove prefix and "_loss"
@@ -1055,6 +1055,8 @@ class PIEIntent(object):
                     if test_m is not None:
                         self._print_row(epoch, 'test', test_m)
 
+                    train_loss = None if logs.get('loss') is None else float(logs['loss'])
+                    val_loss = None if logs.get('val_loss') is None else float(logs['val_loss'])
                     record = {'epoch': epoch + 1, 'train_loss': train_loss,
                             'val_loss': val_loss, 'test_loss': test_loss}
 
@@ -1108,7 +1110,7 @@ class PIEIntent(object):
             for p in (stop_path, short_stop_path):
                 if os.path.exists(p):
                     os.remove(p)   # a stale STOP file would stop this run after epoch 1
-            print(rf"TO STOP-> type nul > 'D:\PIE codes\PIE_dataset\STOP in cmd'\n[stop] to stop cleanly after the current epoch, create the file: {short_stop_path}")
+            print(f"[stop] to stop cleanly after the current epoch, create the file: {short_stop_path}")
             hist_cb = tf.keras.callbacks.History()   # keeps the logs even if fit() is interrupted
 
             call_backs = [EpochMetricsTable(train_eval_dataset, train_d['output'],

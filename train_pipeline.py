@@ -158,6 +158,10 @@ def pick_run_options(hp):
         opts['capacity'] = (interactive_pick_capacity(ask_return_sequences=not temporal)
                             if opts['use_visual'] else None)
         print(f"[config] CAPACITY = {opts['capacity']}")
+        if opts['use_visual'] and opts['architecture'] not in ('pie_convlstm', 'temporal_encoders'):
+            print(f"[capacity] this budget is the PIE graph (ConvLSTM + one decoder LSTM). "
+                  f"Architecture '{opts['architecture']}' has a different decoder; "
+                  f"use the model summary for its parameter count.")
         if temporal and opts.get('capacity'):
             print("[capacity] the numeric budget assumes feature_routing padding=valid. "
                   "Option 8 keeps padding=same. Do not quote that total as the option-8 parameter count.")

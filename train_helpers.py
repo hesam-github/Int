@@ -2352,17 +2352,20 @@ def interactive_pick_use_visual():
         print("  ! enter y or n.", flush=True)
 
 def print_feature_diagnostics(beh_seq):
-    """Print numeric health of every feature and return approximate stds (mean-of-track std)."""
+    """Print numeric health of every feature; class gap uses one label per track."""
     print("\n[feature check] numeric / empty / class gap:", flush=True)
     stds = {}
-    y_all = np.asarray(beh_seq.get('intention_binary', []))
+    y_all = []
+    for t in beh_seq.get('intention_binary', []):
+        t = np.asarray(t).ravel()
+        y_all.append(int(t[0]) if t.size else -1)
+    y_all = np.asarray(y_all, dtype=int)
     skip = {'image', 'images', 'ped_id', 'pid', 'intention_binary', 'intention_prob'}
 
     for name, tracks in beh_seq.items():
         if name in skip or not isinstance(tracks, (list, tuple)):
             continue
-        rows = []
-        y_kept = []
+        rows, y_kept = [], []
         bad = empty = 0
         for i, tr in enumerate(tracks):
             arr = np.asarray(tr)
@@ -2380,11 +2383,11 @@ def print_feature_diagnostics(beh_seq):
             print(f"  {name}: NOT numeric or empty", flush=True)
             continue
         m = np.vstack(rows)
-        y = np.asarray(y_kept) if y_kept else np.array([])
-        if len(y) == 0 or y.min() == y.max():
-            gap = float('nan')
-        else:
+        y = np.asarray(y_kept, dtype=int)
+        if len(y) == m.shape[0] and (y == 1).any() and (y == 0).any():
             gap = float(np.max(np.abs(m[y == 1].mean(0) - m[y == 0].mean(0))))
+        else:
+            gap = float('nan')
         feat_std = float(m.std())
         stds[name] = feat_std
         print(f"  {name}: dim={m.shape[1]} empty={empty} nonnumeric={bad} "
@@ -2392,7 +2395,6 @@ def print_feature_diagnostics(beh_seq):
               f"zero_rows={(np.abs(m).sum(1) == 0).mean():.3f} "
               f"std={feat_std:.4f} max|mean_pos-mean_neg|={gap:.4f}", flush=True)
     return stds
-
 
 def interactive_pick_eval_every(default_idx=1):
     """Asks how often the FULL train/test metrics are computed during training.
