@@ -2207,6 +2207,12 @@ def interactive_pick_decoder_features(beh_seq, use_visual=True):
     leaky = {'obd_speed', 'gps_speed', 'speed'}
     human_labels = {'look', 'action', 'gesture', 'cross'}
     redundant = {'center'}
+    hints = {
+        'pose_critical': '  -- 16 body ratios from COCO joints; not a sitting/phone label',
+        'flow_critical': '  -- 8 leg-vs-torso flow relations; not an action label',
+        'scene_critical': '  -- 16 relations to sidewalk / light / sign',
+    }
+
 
     options = []
     for key, value in beh_seq.items():
@@ -2239,6 +2245,8 @@ def interactive_pick_decoder_features(beh_seq, use_visual=True):
             note = "  -- human annotation, NOT available at deployment, NOT comparable to the paper"
         elif key in redundant:
             note = "  -- derived from bbox, redundant"
+        elif key in hints:
+            note = hints[key]
         else:
             note = ""
         print(f"  [{i}] +{key}  ({width} numbers per frame){note}", flush=True)

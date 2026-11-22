@@ -487,6 +487,163 @@ def attach_pose_dynamics(beh_seq, pose_dir, key='pose_dyn', min_conf=0.3,
               f'frames with no usable keypoint: {empty}/{total} ({100 * empty / max(total, 1):.1f}%)')
     return beh_seq
 
+POSE_CRITICAL_DIM = 16
+
+
+def _kp(xy, ok, name):
+    i = KP[name]
+    return xy[i] if ok[i] else None
+
+
+def _mean_angle(xy, ok, triples):
+    vals = []
+    for a, b, c in triples:
+        pa, pb, pc = _kp(xy, ok, a), _kp(xy, ok, b), _kp(xy, ok, c)
+        if pa is not None and pb is not None and pc is not None:
+            vals.append(_angle(pa, pb, pc) / 180.0)
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def pose_critical_frame(xy, conf, ok, bbox_h, prev_ankles=None):
+    """16-d body configuration. Geometry only: no sitting / phone / talking label.
+
+    Scale is shoulder width, so a tight or loose bbox does not erase a folded leg.
+    0 is missing or a real zero. Slot 10 is 10 when a wrist or the nose is absent,
+    because 0 there would mean the hand is on the nose.
+      0 torso uprightness in [-1, 1]: +1 hip-to-shoulder points up the image
+      1 mean knee angle / 180 (straight ~ 1)
+      2 mean hip angle / 180
+      3 mean elbow angle / 180
+      4 vertical leg / vertical torso (folded legs -> smaller)
+      5 |left ankle x - right ankle x| / shoulder width
+      6 |left ankle y - right ankle y| / shoulder width
+      7 (nose x - shoulder mid x) / shoulder width
+      8 (nose y - shoulder mid y) / shoulder width; image y grows downward
+      9 left-ear confidence - right-ear confidence (head-turn proxy, not gaze)
+     10 min wrist-to-nose distance / shoulder width, or 10 if unavailable
+     11 |left wrist y - right wrist y| / shoulder width
+     12 (shoulder mid x - hip mid x) / shoulder width
+     13 mean ankle speed since the previous consecutive frame, in bbox heights
+     14 fraction of the 17 joints above the confidence gate
+     15 1 if both shoulders, both hips and at least one ankle are present, else 0
+    When slot 15 is 0 the whole vector is 0.
+    """
+    vec = np.zeros(POSE_CRITICAL_DIM, np.float32)
+    ls, rs = _kp(xy, ok, 'l_sho'), _kp(xy, ok, 'r_sho')
+    lh, rh = _kp(xy, ok, 'l_hip'), _kp(xy, ok, 'r_hip')
+    if ls is None or rs is None or lh is None or rh is None:
+        return vec
+    sw = float(np.linalg.norm(ls - rs))
+    if sw < 1e-3:
+        return vec
+    sho = 0.5 * (ls + rs)
+    hip = 0.5 * (lh + rh)
+    torso = sho - hip
+    tlen = float(np.linalg.norm(torso))
+    if tlen < 1e-3:
+        return vec
+
+    vec[0] = np.clip(-torso[1] / tlen, -1.0, 1.0)
+    vec[1] = _mean_angle(xy, ok, (('l_ank', 'l_kne', 'l_hip'), ('r_ank', 'r_kne', 'r_hip')))
+    vec[2] = _mean_angle(xy, ok, (('l_kne', 'l_hip', 'l_sho'), ('r_kne', 'r_hip', 'r_sho')))
+    vec[3] = _mean_angle(xy, ok, (('l_wri', 'l_elb', 'l_sho'), ('r_wri', 'r_elb', 'r_sho')))
+
+    torso_v = abs(float(sho[1] - hip[1]))
+    leg_v = []
+    for ank, hp in ((_kp(xy, ok, 'l_ank'), lh), (_kp(xy, ok, 'r_ank'), rh)):
+        if ank is not None:
+            leg_v.append(abs(float(ank[1] - hp[1])))
+    if leg_v and torso_v > 1e-3:
+        vec[4] = float(np.clip(np.mean(leg_v) / torso_v, 0.0, 4.0))
+
+    la, ra = _kp(xy, ok, 'l_ank'), _kp(xy, ok, 'r_ank')
+    if la is not None and ra is not None:
+        vec[5] = float(np.clip(abs(la[0] - ra[0]) / sw, 0.0, 6.0))
+        vec[6] = float(np.clip(abs(la[1] - ra[1]) / sw, 0.0, 6.0))
+
+    nose = _kp(xy, ok, 'nose')
+    if nose is not None:
+        vec[7] = float(np.clip((nose[0] - sho[0]) / sw, -4.0, 4.0))
+        vec[8] = float(np.clip((nose[1] - sho[1]) / sw, -4.0, 4.0))
+    vec[9] = float(np.clip(conf[KP['l_ear']] - conf[KP['r_ear']], -1.0, 1.0))
+
+    wrist_d = []
+    if nose is not None:
+        for name in ('l_wri', 'r_wri'):
+            w = _kp(xy, ok, name)
+            if w is not None:
+                wrist_d.append(float(np.linalg.norm(w - nose) / sw))
+    vec[10] = float(np.clip(min(wrist_d), 0.0, 10.0)) if wrist_d else 10.0
+
+    lw, rw = _kp(xy, ok, 'l_wri'), _kp(xy, ok, 'r_wri')
+    if lw is not None and rw is not None:
+        vec[11] = float(np.clip(abs(lw[1] - rw[1]) / sw, 0.0, 6.0))
+    vec[12] = float(np.clip((sho[0] - hip[0]) / sw, -4.0, 4.0))
+
+    if prev_ankles is not None and bbox_h > 1e-3:
+        speeds = []
+        for name, slot in (('l_ank', 0), ('r_ank', 1)):
+            cur = _kp(xy, ok, name)
+            prv = prev_ankles[slot]
+            if cur is not None and prv is not None:
+                speeds.append(float(np.linalg.norm(cur - prv) / bbox_h))
+        if speeds:
+            vec[13] = float(np.clip(np.mean(speeds), 0.0, 5.0))
+
+    vec[14] = float(np.mean(ok))
+    vec[15] = 1.0 if (la is not None or ra is not None) else 0.0
+    if vec[15] == 0.0:
+        return np.zeros(POSE_CRITICAL_DIM, np.float32)
+    return vec
+
+
+def attach_pose_critical(beh_seq, pose_dir, key='pose_critical', min_conf=0.3,
+                         min_bbox_height=0, verbose=True):
+    """16-d pose_critical per frame. Same npz files as attach_pose. Not valid for augmented copies."""
+    out, missing_tracks, empty, total = [], 0, 0, 0
+    for i, paths in enumerate(beh_seq['image']):
+        pid = beh_seq['ped_id'][i][0][0]
+        assert '__aug' not in pid, 'attach_pose_critical must run before augmentation'
+        sid, vid, _ = _parse_frame_path(paths[0])
+        f = os.path.join(pose_dir, sid, vid, f'{pid}.npz')
+        total += len(paths)
+        if not os.path.isfile(f):
+            missing_tracks += 1
+            empty += len(paths)
+            out.append([[0.0] * POSE_CRITICAL_DIM for _ in paths])
+            continue
+        with np.load(f) as z:
+            row_of = {int(fr): r for r, fr in enumerate(z['frames'])}
+            kpts = z['kpts']
+        track, prev_ank, prev_fr = [], None, None
+        for j, p in enumerate(paths):
+            fr = _parse_frame_path(p)[2]
+            x1, y1, x2, y2 = [float(v) for v in beh_seq['bbox'][i][j]]
+            h = max(y2 - y1, 1.0)
+            r = row_of.get(fr)
+            small = min_bbox_height > 0 and h < min_bbox_height
+            if r is None or small:
+                empty += 1
+                track.append([0.0] * POSE_CRITICAL_DIM)
+                prev_ank, prev_fr = None, None
+                continue
+            k = kpts[r]
+            ok = k[:, 2] >= min_conf
+            use_prev = prev_ank if (prev_fr is not None and fr - prev_fr == 1) else None
+            vec = pose_critical_frame(k[:, :2], k[:, 2], ok, h, prev_ankles=use_prev)
+            if vec[15] == 0.0:
+                empty += 1
+            track.append(vec.tolist())
+            prev_ank = [k[KP['l_ank'], :2].copy() if ok[KP['l_ank']] else None,
+                        k[KP['r_ank'], :2].copy() if ok[KP['r_ank']] else None]
+            prev_fr = fr
+        out.append(track)
+    beh_seq[key] = out
+    if verbose:
+        print(f'[pose_critical] tracks without file: {missing_tracks}/{len(out)}; '
+              f'frames with no usable torso/ankle: {empty}/{total} '
+              f'({100 * empty / max(total, 1):.1f}%)')
+    return beh_seq
 
 _RES_DIM = 7
 _RES_MIN_PIXELS = 20
@@ -581,4 +738,116 @@ def attach_flow_residual_stats(beh_seq, flow_root, key='flow_res', verbose=True)
         print(f'[flow_res] tracks without data {missing_tracks}/{len(out)}; '
               f'invalid frames {zero_frames}/{total} ({100 * zero_frames / max(total, 1):.1f}%); '
               f'ped vs crop disagree on {bad_frames} frames (should be 0)')
+    return beh_seq
+
+FLOW_CRITICAL_DIM = 8
+
+
+def _flow_critical_vector(ped, crop):
+    """8-d motion relation inside one frame. Not an action class.
+
+    ped, crop: (H, W, 2) float32.
+      0 magnitude of (lower-body mean - background)
+      1 magnitude of (upper-body mean - background)
+      2 lower / (upper + 1e-3), clipped to 20
+      3-4 lower-body residual flow (x, y), pixels/frame
+      5 |left-half mean - right-half mean| inside the lower body
+      6 fraction of person pixels whose flow agrees with the person mean (cosine > 0.5)
+      7 1 if the person mask has enough pixels
+    """
+    vec = np.zeros(FLOW_CRITICAL_DIM, np.float32)
+    mask = np.any(ped != 0, axis=-1)
+    if int(mask.sum()) < _RES_MIN_PIXELS:
+        return vec
+    bg = crop[~mask].mean(axis=0) if (~mask).any() else crop.reshape(-1, 2).mean(axis=0)
+    ys = np.nonzero(mask)[0]
+    mid = 0.5 * (ys.min() + ys.max())
+    rows = np.arange(mask.shape[0])[:, None]
+    lower = mask & (rows >= mid)
+    upper = mask & (rows < mid)
+    if not lower.any():
+        return vec
+    low_res = ped[lower].mean(axis=0) - bg
+    vec[0] = float(np.linalg.norm(low_res))
+    vec[3:5] = low_res
+    if upper.any():
+        up_res = ped[upper].mean(axis=0) - bg
+        vec[1] = float(np.linalg.norm(up_res))
+    vec[2] = float(np.clip(vec[0] / (vec[1] + 1e-3), 0.0, 20.0))
+    xs = np.nonzero(lower)[1]
+    split = np.median(xs)
+    cols = np.arange(mask.shape[1])[None, :]
+    left = lower & (cols <= split)
+    right = lower & (cols > split)
+    if left.any() and right.any():
+        vec[5] = float(np.linalg.norm(ped[left].mean(axis=0) - ped[right].mean(axis=0)))
+    person = ped[mask]
+    mean = person.mean(axis=0)
+    mn = float(np.linalg.norm(mean))
+    if mn > 1e-3:
+        norms = np.linalg.norm(person, axis=1)
+        cos = (person @ mean) / (np.maximum(norms, 1e-3) * mn)
+        vec[6] = float(np.mean(cos > 0.5))
+    vec[7] = 1.0
+    return vec
+
+
+def _flow_critical_track(flow_root, sid, vid, pid):
+    """{frame: (8,) vec} or None. Cached under summary/flowcrit_v1, separate from res_v1."""
+    summary = os.path.join(flow_root, 'summary', 'flowcrit_v1', sid, vid, f'{pid}.npz')
+    if os.path.isfile(summary):
+        with np.load(summary) as z:
+            return {int(fr): z['vec'][r] for r, fr in enumerate(z['frames'])}
+    ped_dir = os.path.join(flow_root, 'ped_mask', sid, vid, pid)
+    crop_dir = os.path.join(flow_root, 'crop_full', sid, vid, pid)
+    if not (os.path.isdir(ped_dir) and os.path.isdir(crop_dir)):
+        return None
+    frames, vecs = [], []
+    for name in sorted(os.listdir(ped_dir)):
+        crop_file = os.path.join(crop_dir, name)
+        if not name.endswith('.npz') or name.endswith('.tmp.npz') or not os.path.isfile(crop_file):
+            continue
+        with np.load(os.path.join(ped_dir, name)) as z:
+            ped = z['flow'].astype(np.float32)
+        with np.load(crop_file) as z:
+            crop = z['flow'].astype(np.float32)
+        if ped.shape != crop.shape:
+            continue
+        frames.append(int(name[:-len('.npz')]))
+        vecs.append(_flow_critical_vector(ped, crop))
+    if not frames:
+        return None
+    _atomic_save(summary, frames=np.array(frames), vec=np.stack(vecs))
+    return dict(zip(frames, vecs))
+
+
+def attach_flow_critical(beh_seq, flow_root, key='flow_critical', verbose=True):
+    """8-d flow_critical. Needs crop_full and ped_mask. Not valid for augmented copies."""
+    for sub in ('crop_full', 'ped_mask'):
+        if not os.path.isdir(os.path.join(flow_root, sub)):
+            print(f'[flow_critical] {sub} folder missing, {key} not attached')
+            return beh_seq
+    out, missing_tracks, zero_frames, total = [], 0, 0, 0
+    for i, paths in enumerate(beh_seq['image']):
+        pid = beh_seq['ped_id'][i][0][0]
+        assert '__aug' not in pid, 'attach_flow_critical does not support augmentation copies'
+        sid, vid, _ = _parse_frame_path(paths[0])
+        vectors = _flow_critical_track(flow_root, sid, vid, pid)
+        if vectors is None:
+            missing_tracks += 1
+        track = []
+        for p in paths:
+            total += 1
+            vec = None if vectors is None else vectors.get(_parse_frame_path(p)[2])
+            if vec is None:
+                vec = np.zeros(FLOW_CRITICAL_DIM, np.float32)
+                zero_frames += 1
+            else:
+                zero_frames += int(np.asarray(vec)[7] == 0)
+            track.append(np.asarray(vec, np.float32).tolist())
+        out.append(track)
+    beh_seq[key] = out
+    if verbose:
+        print(f'[flow_critical] tracks without data {missing_tracks}/{len(out)}; '
+              f'invalid frames {zero_frames}/{total} ({100 * zero_frames / max(total, 1):.1f}%)')
     return beh_seq

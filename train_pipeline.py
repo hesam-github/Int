@@ -330,13 +330,17 @@ def prepare_data(opts, data_opts, pie_path):
 
     if 'pose' in offline:
         _require_dir(pose_dir, 'pose')
-        from extra_features import attach_pose, attach_pose_dynamics
+        from extra_features import attach_pose, attach_pose_dynamics, attach_pose_critical
         pose_scale = opts.get('pose_scale', 'bbox_relative')
         pose_h = opts.get('pose_min_height', 0)
 
-        def attach_pose_family(split, verbose):
-            attach_pose(split, pose_dir, scale=pose_scale, min_bbox_height=pose_h, verbose=verbose)
-            attach_pose_dynamics(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
+    def attach_pose_family(split, verbose):
+        attach_pose(split, pose_dir, scale=pose_scale, min_bbox_height=pose_h, verbose=verbose)
+        attach_pose_dynamics(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
+        attach_pose_critical(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
+
+    attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}_crit1"),
+                    attach_pose_family)
 
         attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}"),
                           attach_pose_family)
@@ -353,14 +357,15 @@ def prepare_data(opts, data_opts, pie_path):
 
     if 'flow' in offline and opts['balance_mode'] != 'augmentation':
         _require_dir(flow_dir, 'flow')
-        from extra_features import attach_flow, attach_flow_relative, attach_flow_residual_stats
+        from extra_features import attach_flow, attach_flow_relative, attach_flow_residual_stats, attach_flow_critical
 
         def attach_flow_family(split, verbose):
             attach_flow(split, flow_dir, verbose=verbose)
             attach_flow_relative(split, verbose=verbose)
             attach_flow_residual_stats(split, flow_dir, verbose=verbose)
+            attach_flow_critical(split, flow_dir, verbose=verbose)
 
-        attach_with_cache('flow', splits, cache_path('flow'), attach_flow_family)
+        attach_with_cache('flow', splits, cache_path('flow_crit1'), attach_flow_family)
 
     lens = [len(track) for track in train['image']]
     print(f"tracks={len(lens)}  min_len={min(lens)}  max_len={max(lens)}")
@@ -373,8 +378,8 @@ def prepare_data(opts, data_opts, pie_path):
         val_augment_mode=(opts['val_augment_mode'] or 'undersample_val'),
         data_seed=opts['data_seed'])
 
-    _feature_keys = ('pose', 'pose_dyn', 'scene', 'scene_critical', 'flow_bbox', 'flow_crop',
-                     'flow_ped', 'flow_rel_ped_crop', 'flow_rel_bbox_crop', 'flow_res')
+    _feature_keys = ('pose', 'pose_dyn', 'pose_critical', 'scene', 'scene_critical', 'flow_bbox', 'flow_crop',
+                    'flow_ped', 'flow_rel_ped_crop', 'flow_rel_bbox_crop', 'flow_res', 'flow_critical')
     for _name, _split in (('train', train), ('val', val)):
         for _k in _feature_keys:
             if _k in _split:
@@ -387,7 +392,8 @@ def prepare_data(opts, data_opts, pie_path):
               "results obtained in this mode.")
         for split in (train, val, test):
             split.pop('pose_dyn', None)
-        print("[warning] pose_dyn removed: invalid for augmented copies.")
+            split.pop('pose_critical', None)
+        print("[warning] pose_dyn and pose_critical removed: invalid for augmented copies.")
 
     # velocity is computed from bbox only (no disk reads), so it is always attached
     from extra_features import attach_velocity, attach_tte

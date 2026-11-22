@@ -747,9 +747,8 @@ def build_pie_temporal_model(encoder_name,
 
         kin_names = {'bbox', 'velocity', 'flow_bbox', 'flow_crop', 'flow_ped'}
         print("[temporal] adaptive kin = bbox, velocity, flow_bbox, flow_crop, flow_ped. "
-              "pose, scene, scene_critical, flow_rel go to the geometric branch. "
-              "This split is hardcoded, not a tested scientific grouping.")
-        kin_parts, geo_parts = [], []
+            "pose, pose_critical, scene, scene_critical, flow_rel, flow_critical go to the geometric branch. "
+            "This split is hardcoded, not a tested scientific grouping.")
         for name, start, end in (feature_spans or []):
             part = SliceColumns(int(start), int(end), name=f'slice_{name}')(decoder_in)
             if name in kin_names:
