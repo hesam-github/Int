@@ -334,13 +334,13 @@ def prepare_data(opts, data_opts, pie_path):
         pose_scale = opts.get('pose_scale', 'bbox_relative')
         pose_h = opts.get('pose_min_height', 0)
 
-    def attach_pose_family(split, verbose):
-        attach_pose(split, pose_dir, scale=pose_scale, min_bbox_height=pose_h, verbose=verbose)
-        attach_pose_dynamics(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
-        attach_pose_critical(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
+        def attach_pose_family(split, verbose):
+            attach_pose(split, pose_dir, scale=pose_scale, min_bbox_height=pose_h, verbose=verbose)
+            attach_pose_dynamics(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
+            attach_pose_critical(split, pose_dir, min_bbox_height=pose_h, verbose=verbose)
 
-    attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}_crit1"),
-                    attach_pose_family)
+        attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}_crit1"),
+                          attach_pose_family)
 
         attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}"),
                           attach_pose_family)
