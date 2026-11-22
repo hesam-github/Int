@@ -861,6 +861,10 @@ class PIEIntent(object):
                 print(f"[aux] heads={aux_model.output_names[1:]} weight each={aux_each:.4f} "
                       f"(main weight 1.0)")
             vprint('TRAINING: loss={} metrics={}'.format(loss, metrics))
+            print("[loss identity] loss/val_loss = weighted head losses + L2. "
+                  "decoder_dense_loss = main head only (one number; weighted-BCE and focal "
+                  "are not logged separately). aux_*_loss = that aux head only. "
+                  "nll in the metrics table is probability NLL, not this objective.")
 
             model_folder_name = time.strftime("%d%b%Y-%Hh%Mm%Ss")
 
@@ -1027,6 +1031,7 @@ class PIEIntent(object):
 
                     test_m = None
                     test_loss = None
+                    test_parts = None
                     if self.test_dataset is not None and run_full_train:
                         test_prob = self._predict_main(self.test_dataset)
                         test_m = compute_full_metrics(self.test_y_true, test_prob)
@@ -1035,9 +1040,10 @@ class PIEIntent(object):
                         test_eval = self.model.evaluate(self.test_dataset, verbose=0)
                         if isinstance(test_eval, (list, tuple)):
                             named = dict(zip(self.model.metrics_names, test_eval))
-                            test_loss = float(named.get('decoder_dense_loss', test_eval[0]))
                         else:
-                            test_loss = float(test_eval)
+                            named = {'loss': float(test_eval)}
+                        test_parts = _fmt_loss_parts(named)
+                        test_loss = None if named.get('loss') is None else float(named['loss'])
 
                     suffix = ""
                     if not run_full_train:
@@ -1045,7 +1051,7 @@ class PIEIntent(object):
                                 else "  (train/test full metrics skipped this epoch)")
 
                     print(f"epoch {epoch+1:>3} | train: {train_parts} | val: {val_parts}"
-                        + (f" | test_main={test_loss:.4f}" if test_loss is not None else "")
+                        + (f" | test: {test_parts}" if test_parts is not None else "")
                         + suffix)
                     if train_m is not None:
                         self._print_row(epoch, 'train', train_m)
