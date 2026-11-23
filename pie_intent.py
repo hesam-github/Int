@@ -1013,53 +1013,69 @@ class PIEIntent(object):
                             parts.append(f"main={main:.4f}")
                         for k, v in sorted(logs.items()):
                             if k.startswith(f"{prefix}aux_") and k.endswith("_loss") and isinstance(v, (int, float)):
-                                name = k[len(prefix):-5]  # remove prefix and "_loss"
+                                name = k[len(prefix):-5]
                                 parts.append(f"{name}={v:.4f}")
                         return " | ".join(parts) if parts else "n/a"
 
                     train_parts = _fmt_loss_parts(logs)
                     val_parts = _fmt_loss_parts(logs, prefix="val_")
 
-                    run_full_train = self._should_run_full_train_eval(epoch)
+                    def _print_kv_block(title, text):
+                        print(f"  {title}")
+                        if not text or text == "n/a":
+                            print("    (none)")
+                            return
+                        items = [p.strip() for p in text.split("|")]
+                        width = max(len(p.split("=", 1)[0].strip()) for p in items)
+                        for p in items:
+                            key, val = p.split("=", 1)
+                            print(f"    {key.strip():<{width}}  {val.strip()}")
 
-                    train_m = None
-                    if run_full_train:
-                        train_prob = self._predict_main(self.train_eval_dataset)
-                        train_m = compute_full_metrics(self.train_y_true, train_prob)
-                        train_m['pred_mean'] = float(train_prob.mean())
-                        train_m['pred_std'] = float(train_prob.std())
+                    def _print_metric_block(title, m):
+                        rows = [
+                            ("accuracy", m["accuracy"]),
+                            ("majority_acc", m["majority_acc"]),
+                            ("precision", m["precision"]),
+                            ("recall", m["recall"]),
+                            ("specificity", m["specificity"]),
+                            ("balanced_acc", m["balanced_acc"]),
+                            ("f1", m["f1"]),
+                            ("auc", m["roc_auc"]),
+                            ("ap", m["pr_auc"]),
+                            ("nll", m["nll"]),
+                            ("ece", m["ece"]),
+                            ("pmean", m["pred_mean"]),
+                            ("pstd", m["pred_std"]),
+                        ]
+                        print(f"  {title}")
+                        for name, val in rows:
+                            print(f"    {name:<14}  {val:8.4f}")
 
-                    test_m = None
-                    test_loss = None
-                    test_parts = None
-                    if self.test_dataset is not None and run_full_train:
-                        test_prob = self._predict_main(self.test_dataset)
-                        test_m = compute_full_metrics(self.test_y_true, test_prob)
-                        test_m['pred_mean'] = float(test_prob.mean())
-                        test_m['pred_std'] = float(test_prob.std())
-                        test_eval = self.model.evaluate(self.test_dataset, verbose=0)
-                        if isinstance(test_eval, (list, tuple)):
-                            named = dict(zip(self.model.metrics_names, test_eval))
-                        else:
-                            named = {'loss': float(test_eval)}
-                        test_parts = _fmt_loss_parts(named)
-                        test_loss = None if named.get('loss') is None else float(named['loss'])
+                    def _print_epoch_report(self, epoch, train_parts, val_parts, test_parts,
+                                            suffix, train_m, val_m, test_m, head_auc):
+                        print(f"\nepoch {epoch + 1}")
+                        _print_kv_block("train loss", train_parts)
+                        _print_kv_block("val loss", val_parts)
+                        if test_parts is not None:
+                            _print_kv_block("test loss", test_parts)
+                        if suffix:
+                            print(suffix.strip())
+                        print()
+                        if train_m is not None:
+                            _print_metric_block("train metrics", train_m)
+                        _print_metric_block("val metrics", val_m)
+                        if head_auc:
+                            print("  val branch AUC")
+                            width = max(len(k) for k in head_auc)
+                            for k, v in head_auc.items():
+                                print(f"    {k:<{width}}  {v:8.4f}")
+                        if test_m is not None:
+                            _print_metric_block("test metrics", test_m)
 
-                    suffix = ""
-                    if not run_full_train:
-                        suffix = ("  (train/test full metrics off)" if self.eval_every is None
-                                else "  (train/test full metrics skipped this epoch)")
-
-                    print(f"epoch {epoch+1:>3} | train: {train_parts} | val: {val_parts}"
-                        + (f" | test: {test_parts}" if test_parts is not None else "")
-                        + suffix)
-                    if train_m is not None:
-                        self._print_row(epoch, 'train', train_m)
-                    self._print_row(epoch, 'val', val_m)
-                    if head_auc:
-                        print(f"epoch {epoch+1:>3} [val branch AUC] " + " ".join(f"{k}={v:.4f}" for k, v in head_auc.items()))
-                    if test_m is not None:
-                        self._print_row(epoch, 'test', test_m)
+                    # فراخوانی (جایگزین print قبلی):
+                    self._print_epoch_report(
+                        epoch, train_parts, val_parts, test_parts, suffix,
+                        train_m, val_m, test_m, head_auc)
 
                     train_loss = None if logs.get('loss') is None else float(logs['loss'])
                     val_loss = None if logs.get('val_loss') is None else float(logs['val_loss'])

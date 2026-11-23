@@ -1,0 +1,824 @@
+
+[offline_features] use the features you processed offline?
+  [n] none  -- no disk reads at all (fastest; bbox / velocity / annotation features only)
+  [a] all
+  [0] pose: YOLO keypoints (extra/pose)
+  [1] scene: SegFormer label maps -> 24-d scene vector (extra/scene)
+  [2] flow: optical flow summaries (extra/flow)
+  Enter comma-separated indices (e.g. 0,2), 'a' or 'n'. [default: all]
+[feeder] interactive_pick_offline_features <- '1'
+[config] OFFLINE_FEATURES = ['scene']
+
+[use_visual] does the model need the VGG16 image context?
+  [n] no  -- VGG16 is NOT loaded. Decoder only (bbox, velocity, annotations, offline pose/scene/flow).
+  [y] yes -- VGG16 context feeds the ConvLSTM encoder. Slow: extracts features for every frame.  <-- default
+[feeder] interactive_pick_use_visual <- 'y'
+[config] USE_VISUAL = True
+
+--- Architecture ---
+  1. pie_convlstm * — PIE paper: ConvLSTM on VGG + single LSTM on bbox/decoder
+  2. bbox_only — BBox-only baseline (zero visual features, LSTM on bbox)
+  3. pcpa — PCPA-style: visual branch + bbox LSTM + shared extras + attention
+  4. branchattn — Branch attention. Sub-menu: static_pool, temporal_concat, or core_plus_extras
+  5. branchattn_temporal — Same sub-menu as branchattn. static_pool: temporal attention on every span including bbox. core_plus_extras: temporal attention only on extra spans, not on the core. temporal_concat: no temporal attention.
+  6. encoder_extras — Extras tiled into ConvLSTM channels (feature_target=encoder)
+  7. both — Extras in both ConvLSTM channels and decoder LSTM
+  8. temporal_encoders — PIE decoder + selectable temporal visual encoder (ConvLSTM2D / Transformer / S4 / S4D / Mamba)
+  9. decoder_only — use_visual=False. One LSTM on the decoder matrix. No ConvLSTM, no visual_norm, no capacity.
+[feeder] interactive_pick_architecture <- '5'
+[config] ARCHITECTURE = branchattn_temporal
+
+--- Branch fusion ---
+ 1. static_pool       * default: Dense(visual) + one LSTM per column + BranchAttnPool [aux + attn log]
+ 2. temporal_concat   PIE graph, ONE LSTM, no branches [NO aux, NO attn log]
+ 3. core_plus_extras  PIE core on bbox only; one LSTM per extra column [aux + attn log, needs >=1 extra feature]
+[feeder] interactive_pick_branch_mode <- '3'
+[config] BRANCH_MODE = core_plus_extras
+
+--- branchattn: temporal block of the VISUAL encoder ---
+    Default: the original ConvLSTM2D of this graph (padding valid).
+[feeder] choose_branch_temporal_for_menu <- 'n'
+
+--- branchattn: temporal block of each decoder BRANCH ---
+    The core LSTM of core_plus_extras always stays an LSTM (control).
+[feeder] choose_branch_temporal_for_menu <- 'n'
+[config] BRANCH_VISUAL_ENCODER = convlstm2d (original) {}
+[config] BRANCH_TEMPORAL_KIND  = lstm {}
+
+[bbox_mode] decoder bbox columns:
+  [0] normal: bbox used as selected  <-- default
+  [1] zero: bbox columns = 0 (visual-only diagnostic; bbox_branch is zeroed too)
+      note: the VGG crop is still cut around the person, so it still encodes position and size
+[feeder] interactive_pick_zero_decoder_bbox <- '0'
+[config] ZERO_DECODER_BBOX = False
+
+[visual_norm] standardize VGG16 conv5 maps per channel before the ConvLSTM?
+  [n] no  -- raw VGG16 activations, as cached  <-- default
+  [y] yes -- (x - mean_train) / std_train per channel; statistics from TRAIN only
+[feeder] interactive_pick_visual_norm <- 'n'
+[config] VISUAL_NORM = False
+[feeder] visual_percentile <- 'n'
+[config] USE_PERCENTILE = False
+
+[capacity] presets for the visual branch (every choice except the baseline deviates from the paper):
+  [0] baseline (paper design)  <-- default
+  [1] A: 1x1 bottleneck after ConvLSTM (64 -> 8)
+  [2] B: 1x1 input projection (512 -> 64)
+  [3] A+B
+  [4] A+B with decoder hidden units 64
+  [5] custom (asked step by step)
+[feeder] interactive_pick_capacity <- '0'
+[feeder] interactive_pick_capacity <- 'n'
+[feeder] interactive_pick_capacity <- 'n'
+
+[capacity] parameter budget (visual branch + decoder):
+  ConvLSTM2D 512 -> 64, kernel 2, valid                      590,080
+  decoder LSTM in=2308 (flat 2304 + bbox 4), units=128     1,247,744
+  decoder Dense 128 -> 1                                         129
+  ------------------------------------------------------------------
+  TOTAL                                                    1,837,953
+  share of baseline                                           100.0%
+[capacity] decoder LSTM input width = 2308
+[capacity] baseline selected: this is the paper design, no capacity change.
+[capacity] reminder: any reduction deviates from the paper. Report it as an ablation and compare with a parameter-matched bbox-only control.
+[config] CAPACITY = {'convlstm_filters': 64, 'log1p': False, 'encoder_reduce': 0, 'input_reduce': 0, 'hidden_units': 128, 'return_sequences': False}
+[capacity] this budget is the PIE graph (ConvLSTM + one decoder LSTM). Architecture 'branchattn_temporal' has a different decoder; use the model summary for its parameter count.
+
+[visual_pipeline] experiment A: VGG -> ConvLSTM  (raw)
+
+[log_mode] choose console verbosity for this run:
+  [0] clean  (phase explanations + meaningful metrics only (recommended))  <-- default
+  [1] full  (everything, including raw config dumps (original behavior))
+[feeder] interactive_pick_log_mode <- '0'
+[config] LOG_MODE = clean
+
+[balance_mode] existing balancing strategies:
+  [0] augmentation  (custom method -- geometric + photometric + temporal (shift/speed/occlusion) + micro-jitter)  <-- default
+  [1] undersample_base_article  (PIEPredict-style undersampling (not verified identical to the reference code))
+  [2] none  (no balancing -- raw imbalanced train/val (use with weighted_bce/focal_loss))
+[feeder] interactive_pick_balance_mode <- '2'
+[config] BALANCE_MODE = none
+
+[monitor_metric] choose what EarlyStopping/Checkpoint/Plateau monitor:
+  [0] val_nll (min)  -- validation NLL, data term only (no L2)  <-- default
+  [1] val_auc (max)  -- validation ROC-AUC
+  [2] val_loss (min)  -- validation loss incl. L2 (not a generalization metric)
+[feeder] interactive_pick_monitor_metric <- '1'
+[config] MONITOR_METRIC = val_auc (mode=max)
+
+[loss_function] choose the training loss function:
+  [0] binary_crossentropy  (standard BCE loss)  <-- default
+  [1] focal_loss           (focal loss for class imbalance)
+  [2] weighted_bce         (pos_weight computed AUTOMATICALLY from the train split's real class counts, after balancing/augmentation is applied)
+  [3] composite            (CE + optional focal / smoothing / confidence / ranking)
+  [4] weighted_bce + focal  (weighted BCE + focal; pos_weight automatic or custom)
+[feeder] interactive_pick_loss_choice <- '4'
+[feeder] interactive_pick_loss_choice <- ''
+[feeder] interactive_pick_loss_choice <- ''
+  [bce_plus_focal] positive-class weight (pos_weight):
+    [0] automatic  (same as weighted_bce: neg/pos on final train split)  <-- default
+    [1] custom     (enter a number; use 1.0 for already-balanced data)
+[feeder] interactive_pick_loss_choice <- '0'
+[config] LOSS_FUNCTION (family) = wbce_focal_g2.0_w1.0_auto
+
+[clip_mode] choose the gradient-clipping strategy:
+  [0] clipvalue  (element-wise clipping -- each gradient component clamped independently (can distort gradient direction, cheapest))  <-- default
+  [1] clipnorm  (per-variable norm clipping -- each weight tensor's OWN norm clamped separately (direction preserved per-tensor))
+  [2] global_clipnorm  (global norm clipping -- ONE norm across ALL trainable variables, same as torch.nn.utils.clip_grad_norm_ (direction of the full gradient preserved))
+  [3] none  (no gradient clipping)
+[feeder] interactive_pick_clip_mode <- '3'
+[clip_mode] gradient clipping disabled.
+
+[weight_decay] RMSprop weight_decay in TF 2.10.1 / Keras 2.10.0:
+  NOT SUPPORTED. Keras 2.10.0's RMSprop has no 'weight_decay' argument -- any non-zero value crashes at optimizer construction.
+  L2 regularization in this project comes from REGULARIZER_VAL (kernel/recurrent/bias regularizers), which is unaffected by this.
+[feeder] interactive_pick_weight_decay <- ''
+[weight_decay] weight_decay = 0.0
+[config] WEIGHT_DECAY = 0.0
+
+[lstm_recurrent_activation]
+  1) sigmoid       (current code default)
+  2) hard_sigmoid  (official model.h5)
+[feeder] interactive_pick_lstm_recurrent_activation <- '2'
+
+[normalize_bbox] decoder bbox representation:
+  [0] raw pixels (x1, y1, x2, y2). Same as earlier runs; large values saturate the gates
+  [1] centre-x/W, ground-y/H, log(h/H)/5, log(w/W)/5. Keeps size and ground-position cues
+  (default: [1])
+[feeder] interactive_pick_normalize_bbox <- '0'
+[config] normalize_decoder_bbox = False
+[feeder] plateau <- 'y'
+[config] LSTM_REC_ACT=hard_sigmoid NORM_BBOX=False USE_PLATEAU=True
+
+[eval_every] how often to compute full train/test metrics during training:
+  [0] every epoch
+  [1] every 5 epochs  <-- default
+  [2] every 10 epochs
+  [3] custom N
+  [4] never (train/test full metrics off; val still every epoch)
+[feeder] interactive_pick_eval_every <- '4'
+[config] EVAL_EVERY = never
+[config] POSE_SCALE = bbox_relative  POSE_MIN_HEIGHT = 0
+[feeder] tte <- 'n'
+[config] USE_TTE = False
+[config] preset=none: lr=1e-05 clip_type=none clip_amount=None batch_size=64 normalize_decoder_bbox=False
+[config] CLIP_TYPE = none  CLIP_AMOUNT = None
+[config] BATCH_SIZE = 64  (hp requested 64)
+
+[data_split_type] existing split strategies (verified against pie_data.py):
+  [0] default  (fixed video-SET split: train=[set01,02,04] val=[set05,06] test=[set03] -- matches aras62/PIEPredict/train_test.py CODE (not the paper's stated random 50/40/10 text))  <-- default
+  [1] random  (random PEDESTRIAN-id split, ratios you choose -- matches the paper TEXT's described 50/40/10 protocol)
+  [2] kfold  (k-fold pedestrian-id split -- PIE only gives train/test per fold, val must be carved out of train manually (handled automatically below))
+[feeder] interactive_pick_data_split <- '0'
+[config] data_split_type = default
+
+[seed] independent seeds:
+  train  : weight init, dropout masks
+  shuffle: epoch order of training windows (Enter = same as train seed)
+  data   : undersampling / augmentation draws
+           balance_mode=none has no random draw: data seed has no effect
+[feeder] interactive_pick_seeds <- '1'
+[feeder] interactive_pick_seeds <- ''
+[feeder] interactive_pick_seeds <- '42'
+  split  : not used (default split is fixed by video sets)
+[config] TRAIN_SEED=1 SHUFFLE_SEED=1 DATA_SEED=42 SPLIT_SEED=42
+
+>>> Building train/val/test sequences
+    Loads or builds the (train, val, test) pedestrian tracks according to data_split_type -- cached to disk by content hash, so repeated runs with identical settings are instant.
+D:\PIE codes\PIE_dataset\annotations\set01\video_0001_annt.xml
+[annotations] video set01/video_0001
+[annotations] per-frame pedestrian fields: ['bbox', 'occlusion', 'action', 'cross', 'gesture', 'look']
+[annotations] center is computed from bbox, not stored in the XML
+[annotations] obd_speed and gps_speed belong to the vehicle, not the pedestrian
+Building train/val sequences...
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_train_74504d6a20b0a553.pkl
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_val_68b924fa1bb70c41.pkl
+Building test sequence...
+---------------------------------------------------------
+Loading cached sequence data from D:\PIE codes\PIE_dataset\data_cache\seq_test_1d611361479b67a1.pkl
+[offline] scene: cache hit (scene_light1_v2_652ba0450e.pkl)
+tracks=878  min_len=16  max_len=435
+tracks shorter than 15: 0
+
+>>> Applying balance strategy
+    Controls whether the RAW class imbalance in train/val is kept as-is (relying on the loss function to compensate), fixed by discarding majority-class samples (undersampling), or fixed by generating synthetic minority-class copies (augmentation).
+Skipping balancing entirely -- train/val kept at raw, naturally imbalanced class distribution.
+[balance_mode=none] train class counts: positive=638 negative=240 (positive_rate=0.7267)
+[balance_mode=none] val class counts: positive=181 negative=62 (positive_rate=0.7449)
+[flow] not selected: nothing loaded
+
+>>> Finalizing the loss function
+    For weighted_bce, pos_weight is computed HERE from the TRAIN split's real, final class counts (after any balancing above) -- never from val/test, and never a hardcoded guess.
+[loss] pos_weight computed from TRAIN split ONLY: pos=638 neg=240 -> pos_weight=0.3762
+[config] LOSS_FUNCTION (final) = wbce_focal_g2.0_w1.0_pw0.3761755485893417
+[config] DATA_SPLIT_TAG = defaultSplit
+
+[feature check] numeric / empty / class gap:
+  bbox: dim=4 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=324.4005 max|mean_pos-mean_neg|=13.6033
+  center: dim=2 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=320.1142 max|mean_pos-mean_neg|=10.1935
+  occlusion: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.487 std=0.4162 max|mean_pos-mean_neg|=0.1749
+  gesture: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.995 std=0.0810 max|mean_pos-mean_neg|=0.0100
+  look: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.596 std=0.2977 max|mean_pos-mean_neg|=0.0841
+  action: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.467 std=0.4638 max|mean_pos-mean_neg|=0.0329
+  cross: dim=1 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.938 std=0.1296 max|mean_pos-mean_neg|=0.0018
+  scene: dim=24 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=0.2342 max|mean_pos-mean_neg|=0.2114
+  scene_critical: dim=16 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.000 std=1.3516 max|mean_pos-mean_neg|=2.2362
+  light_color: dim=4 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.113 std=0.3545 max|mean_pos-mean_neg|=0.3712
+  velocity: dim=4 empty=0 nonnumeric=0 nan=0.000 zero_rows=0.002 std=0.0171 max|mean_pos-mean_neg|=0.0017
+
+[decoder_features] decoder input = bbox (always) + optional extras:
+  [0] bbox only  (raw bbox, 4 numbers; plus VGG16 context)  <-- default
+  [1] +center  (2 numbers per frame)  -- derived from bbox, redundant
+  [2] +occlusion  (1 numbers per frame)
+  [3] +gesture  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [4] +look  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [5] +action  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [6] +cross  (1 numbers per frame)  -- human annotation, NOT available at deployment, NOT comparable to the paper
+  [7] +scene  (24 numbers per frame)
+  [8] +scene_critical  (16 numbers per frame)  -- 16 relations to sidewalk / light / sign
+  [9] +light_color  (4 numbers per frame)
+  [10] +velocity  (4 numbers per frame)
+  [11] +bbox_branch  (4 numbers per frame)  -- separate copy of the raw bbox, its own parallel branch (scaling asked next)
+[feeder] interactive_pick_decoder_features <- '8,9'
+[config] decoder_input_type = ['bbox', 'scene_critical', 'light_color']
+
+[extra_norm] scaling of pose/occlusion/scene columns (not bbox):
+  [0] none: leave extras as attach_* wrote them.  <-- default
+  [1] zscore: train mean/std on extra columns only, applied to val and test. Bbox is still raw, so bbox can still dominate.
+[feeder] interactive_pick_extra_norm <- '1'
+
+[feature_norm] scaling per selected feature (main bbox was decided earlier):
+  scene_critical:  [approx std=1.3516]
+    [0] none: leave values as they are
+    [1] zscore: z-score with train statistics  <-- default
+    [2] x5: multiply by 5
+    [3] x10: multiply by 10
+    [4] x20: multiply by 20
+    [5] x50: multiply by 50
+    [6] x100: multiply by 100
+    [7] custom: multiply by a number you type
+[feeder] interactive_pick_feature_norms <- '1'
+  light_color:  [approx std=0.3545]
+    [0] none: leave values as they are
+    [1] zscore: z-score with train statistics  <-- default
+    [2] x5: multiply by 5
+    [3] x10: multiply by 10
+    [4] x20: multiply by 20
+    [5] x50: multiply by 50
+    [6] x100: multiply by 100
+    [7] custom: multiply by a number you type
+[feeder] interactive_pick_feature_norms <- '1'
+[config] feature_norm = {'scene_critical': 'zscore', 'light_color': 'zscore'}
+[config] ARCHITECTURE  = branchattn_temporal
+[config] FUSION        = branchattn_temporal
+[config] FEATURE_TARGET= decoder
+[config] BRANCH_MODE   = core_plus_extras
+[config] ZERO_VISUAL   = False
+[config] TEMPORAL_FUSION = pie_concat
+
+--- Auxiliary per-branch loss (any multi-branch architecture) ---
+  0   off (only the loss on the fused output)  <-- default
+  >0  every branch gets its own sigmoid head; the TOTAL aux weight is split equally
+      between the heads (main loss weight stays 1.0). Try 0.25 / 0.5 / 1.0.
+[feeder] interactive_pick_aux_loss <- '0.5'
+[config] AUX_LOSS_WEIGHT = 0.5
+[config] TEMPORAL_ENCODER = None
+[config] TEMPORAL_HP      = {}
+[config] USE_TTE  = False
+[config] FLOW_FEATURES   = []
+
+[run_name] existing run folders under:
+  D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal
+  [0] BAttnT9_bbox_context_occlusion_look_action_cross_pose_scene_velocity_randomSplit_r0.5-0.4-0.1_clipvalue0.3_noBalance_Reg0.001_LR1e-5_lsdr0.4_lsre0.2_esmd0.0001_esp15_focal_loss_g1.8_a0.25_val_auc_seed42_recHS_noNorm_pabs_ev10_15_8_1405-23h04m05s
+  [1] vdz_BAttnT2_bbox_context_randomSplit
+  [2] BAttnT2_bbox_context_randomSplit
+  [3] relational offline features_BAttnT7_bbox_context_pose_dyn_scene_critical_flow_rel_ped_crop_flow_rel_bbox_crop_flow_res_defaultSplit
+  [4] strongBranches_aux.5_BAttnT6_bbox_context_pose_dyn_scene_critical_flow_rel_ped_crop_flow_res_defaultSplit
+  [5] strong_branches_hard on non cros_BAttnT5_bbox_context_pose_dyn_scene_critical_flow_res_defaultSplit
+  [6] mamba temporal encoder_BAttnT5_mamba_bbox_context_pose_dyn_scene_critical_flow_res_defaultSplit
+  [7] mamba temporal encoder_BAttnT5_mamba_bmamba_bbox_context_pose_dyn_scene_critical_flow_res_defaultSplit
+  [8] mamba temporal encoder_BAttnT5_mamba_bmamba_bbox_context_pose_dyn_scene_critical_flow_res_defaultSplit_run2
+  [9] mamba temporal encoder_BAttnT5_mamba_bbox_context_pose_dyn_scene_critical_flow_res_defaultSplit_run2
+  [10] mamba temporal encoder_BAttnT5_mamba3_bbox_context_pose_dyn_scene_critical_flow_res_defaultSplit
+  [11] mamba3 temporal encoder_BAttnT5_mamba3_bbox_context_pose_dyn_scene_critical_flow_res_defaultSplit
+  [12] Base seq len 30_45 __BAttnT2_bbox_context_defaultSplit
+  [13] BAttnT8_bbox_context_pose_critical_scene_critical_flow_rel_ped_crop_flow_rel_bbox_crop_flow_res_flow_critical_defaultSplit
+  [14] aA_BAttnT3_bbox_context_scene_critical_defaultSplit
+  [15] aC_BAttnT8_bbox_context_pose_critical_scene_critical_flow_res_flow_rel_ped_crop_flow_rel_bbox_crop_flow_critical_defaultSplit
+  [16] aB_BAttnT4_bbox_context_scene_critical_pose_critical_defaultSplit
+[feeder] interactive_pick_new_run_name <- 'aD'
+
+[config] ARCHITECTURE = branchattn_temporal
+[config] RUN_NAME     = aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit
+[seed] TF op determinism ENABLED
+Run dir      -> D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit
+Console log  -> D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\logs\console_23Nov2026-10h10m04s.txt
+[choices] saved to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\choices.json
+
+--- architecture hyperparams ---
+hidden_units          -> 128
+convlstm_filters      -> 64
+convlstm_kernel       -> 2
+regularizer_val       -> 0.001
+lstm_dropout          -> 0.4
+lstm_rec_dropout      -> 0.2
+lstm_rec_activation   -> hard_sigmoid
+branch_mode           -> core_plus_extras
+branch_visual_encoder -> None
+branch_temporal_kind  -> lstm
+branch_visual_hp      -> {}
+branch_temporal_hp    -> {}
+aux_loss_weight       -> 0.5
+
+--- optimizer/training hyperparams ---
+lr                    -> 1e-05
+clip_type             -> none
+clip_amount           -> None
+weight_decay          -> 0.0
+batch_size            -> 64
+es_min_delta          -> 0.0001
+es_patience           -> 10
+use_plateau           -> True
+monitor_metric        -> val_auc (mode=max)
+loss                  -> wbce_focal_g2.0_w1.0_pw0.3761755485893417
+
+--- data hyperparams ---
+data_split_type       -> default
+balance_mode          -> none
+val_augment_mode      -> None
+normalize_decoder_bbox-> False
+pose_scale            -> bbox_relative
+feature_target        -> decoder
+fusion                -> branchattn_temporal
+extra_norm            -> zscore
+feature_norm          -> {'scene_critical': 'zscore', 'light_color': 'zscore'}
+zero_visual           -> False
+[summary] written to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\run_summary.txt
+
+GPUs visible to TF: [PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+Running with GPU enabled.
+[config] temporal_encoder = None
+[config] model.normalize_decoder_bbox = False
+[config] branch_mode=core_plus_extras temporal_fusion=pie_concat
+[config] routing fusion=branchattn_temporal target=decoder extra_norm=zscore pose_scale=bbox_relative zero_visual=False use_visual=True
+PIEIntentExperiment(framework='tensorflow', architecture='branchattn_temporal', run_name='aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit', run_dir='D:\\PIE codes\\PIE_dataset\\experiments\\tensorflow\\branchattn_temporal\\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit')
+Epochs for this run -> 400
+
+>>> Training
+    Runs model.fit() with early stopping and checkpointing on the chosen monitor metric. Per-epoch train/val/test metrics printed below use the SAME overlap as the training windows -- these differ from the final evaluation numbers below, which use overlap=1 unless an overlap=0.5 pass is requested.
+min_track_size = 15
+seq_overlap_rate = 0.5
+[config] z-score 'scene_critical' fit on 138450 rows (train only)
+[config] z-score 'light_color' fit on 138450 rows (train only)
+[config] feature spans: [('bbox', 0, 4), ('scene_critical', 4, 20), ('light_color', 20, 24)]
+[config] decoder input width = 24 from ['bbox', 'scene_critical', 'light_color']
+[config] feature spans: [('bbox', 0, 4), ('scene_critical', 4, 20), ('light_color', 20, 24)]
+[config] decoder input width = 24 from ['bbox', 'scene_critical', 'light_color']
+feature_shape from context_model: (7, 7, 512)
+[features] reusing stacked cache D:\PIE codes\PIE_dataset/data/data\pie\train\features_context_pad_resize\vgg16_none_prep1_stacked_train_9230_15_82e3c89f9667_7x7x512.dat
+[features] reusing stacked cache D:\PIE codes\PIE_dataset/data/data\pie\val\features_context_pad_resize\vgg16_none_prep1_stacked_val_2593_15_9f0b34adf7bc_7x7x512.dat
+[seed] global seed = 1 (weights/dropout/shuffle)
+[config] fusion=branchattn_temporal feature_target=decoder decoder_width=24 extra_width=20
+[visual_pipeline] graph order: VGG -> (raw) -> ConvLSTM
+[config] extra_input_dropout=0.0 (core keeps 0.4)
+[config] branch_mode=core_plus_extras temporal_attention=True
+[config] branch_temporal_kind=lstm {}
+[config] aux heads (train only): ['aux_core_bbox_visual', 'aux_scene_critical', 'aux_light_color']
+Model: "model"
+__________________________________________________________________________________________________
+ Layer (type)                   Output Shape         Param #     Connected to                     
+==================================================================================================
+ encoder_input (InputLayer)     [(None, 15, 7, 7, 5  0           []                               
+                                12)]                                                              
+                                                                                                  
+ conv_lstm2d (ConvLSTM2D)       (None, 6, 6, 64)     590080      ['encoder_input[0][0]']          
+                                                                                                  
+ encoder_flatten (Flatten)      (None, 2304)         0           ['conv_lstm2d[0][0]']            
+                                                                                                  
+ decoder_input (InputLayer)     [(None, 15, 24)]     0           []                               
+                                                                                                  
+ repeat_vector (RepeatVector)   (None, 15, 2304)     0           ['encoder_flatten[0][0]']        
+                                                                                                  
+ bbox_slice (SliceColumns)      (None, 15, 4)        0           ['decoder_input[0][0]']          
+                                                                                                  
+ slice_scene_critical (SliceCol  (None, 15, 16)      0           ['decoder_input[0][0]']          
+ umns)                                                                                            
+                                                                                                  
+ slice_light_color (SliceColumn  (None, 15, 4)       0           ['decoder_input[0][0]']          
+ s)                                                                                               
+                                                                                                  
+ core_concat (Concatenate)      (None, 15, 2308)     0           ['repeat_vector[0][0]',          
+                                                                  'bbox_slice[0][0]']             
+                                                                                                  
+ branch_scene_critical (LSTM)   (None, 15, 128)      74240       ['slice_scene_critical[0][0]']   
+                                                                                                  
+ branch_light_color (LSTM)      (None, 15, 128)      68096       ['slice_light_color[0][0]']      
+                                                                                                  
+ core_decoder (LSTM)            (None, 128)          1247744     ['core_concat[0][0]']            
+                                                                                                  
+ tattn_scene_critical (Additive  (None, 128)         8320        ['branch_scene_critical[0][0]']  
+ TemporalAttention)                                                                               
+                                                                                                  
+ tattn_light_color (AdditiveTem  (None, 128)         8320        ['branch_light_color[0][0]']     
+ poralAttention)                                                                                  
+                                                                                                  
+ branch_attention (BranchAttnPo  [(None, 128),       387         ['core_decoder[0][0]',           
+ ol)                             (None, 3)]                       'tattn_scene_critical[0][0]',   
+                                                                  'tattn_light_color[0][0]']      
+                                                                                                  
+ decoder_dense (Dense)          (None, 1)            129         ['branch_attention[0][0]']       
+                                                                                                  
+==================================================================================================
+Total params: 1,997,316
+Trainable params: 1,997,316
+Non-trainable params: 0
+__________________________________________________________________________________________________
+[arch] BUILT via feature_routing: fusion=branchattn_temporal feature_target=decoder zero_visual=False
+[aux] heads=['aux_core_bbox_visual', 'aux_scene_critical', 'aux_light_color'] weight each=0.1667 (main weight 1.0)
+[loss identity] loss/val_loss = weighted head losses + L2. decoder_dense_loss = main head only (one number; weighted-BCE and focal are not logged separately). aux_*_loss = that aux head only. nll in the metrics table is probability NLL, not this objective.
+Wrote configs to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\configs
+Wrote hyperparams to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\hyperparams.json
+[stop] to stop cleanly after the current epoch, create the file: D:\PIE codes\PIE_dataset\STOP
+[lr] initial learning rate = 1.000e-05
+epoch   1 | train: total=3.1196 | main=0.5703 | aux_core_bbox_visual=0.6456 | aux_light_color=0.5476 | aux_scene_critical=0.5573 | val: total=3.0522 | main=0.5582 | aux_core_bbox_visual=0.6139 | aux_light_color=0.5420 | aux_scene_critical=0.5621  (train/test full metrics off)
+epoch   1 [val  ] accuracy=0.5935 majority_acc=0.7119 precision=0.6768 recall=0.8212 specificity=0.0308 balanced_acc=0.4260 f1=0.7420 auc=0.4152 ap=0.6867 nll=0.6785 ece=0.1874 pmean=0.526 pstd=0.024
+epoch   1 [val branch AUC] aux_core_bbox_visual=0.5349 aux_scene_critical=0.5355 aux_light_color=0.6912
+epoch   1 [attn] core_bbox_visual=0.227 scene_critical=0.381 light_color=0.392 | entropy=0.967 | top1 share: 0.02 0.41 0.57
+epoch   2 | train: total=3.0005 | main=0.5521 | aux_core_bbox_visual=0.6289 | aux_light_color=0.5434 | aux_scene_critical=0.5542 | val: total=2.9391 | main=0.5442 | aux_core_bbox_visual=0.5953 | aux_light_color=0.5388 | aux_scene_critical=0.5584  (train/test full metrics off)
+epoch   2 [val  ] accuracy=0.6949 majority_acc=0.7119 precision=0.7261 recall=0.9177 specificity=0.1446 balanced_acc=0.5311 f1=0.8107 auc=0.5626 ap=0.7545 nll=0.6637 ece=0.1789 pmean=0.533 pstd=0.026
+epoch   2 [val branch AUC] aux_core_bbox_visual=0.5548 aux_scene_critical=0.5449 aux_light_color=0.7122
+epoch   2 [attn] core_bbox_visual=0.225 scene_critical=0.383 light_color=0.392 | entropy=0.966 | top1 share: 0.01 0.40 0.59
+epoch   3 | train: total=2.8866 | main=0.5349 | aux_core_bbox_visual=0.6158 | aux_light_color=0.5385 | aux_scene_critical=0.5510 | val: total=2.8334 | main=0.5328 | aux_core_bbox_visual=0.5840 | aux_light_color=0.5350 | aux_scene_critical=0.5550  (train/test full metrics off)
+epoch   3 [val  ] accuracy=0.7023 majority_acc=0.7119 precision=0.7430 recall=0.8895 specificity=0.2396 balanced_acc=0.5646 f1=0.8097 auc=0.6476 ap=0.8025 nll=0.6506 ece=0.1726 pmean=0.539 pstd=0.035
+epoch   3 [val branch AUC] aux_core_bbox_visual=0.5620 aux_scene_critical=0.5596 aux_light_color=0.7115
+epoch   3 [attn] core_bbox_visual=0.221 scene_critical=0.384 light_color=0.394 | entropy=0.964 | top1 share: 0.00 0.41 0.59
+epoch   4 | train: total=2.7803 | main=0.5200 | aux_core_bbox_visual=0.6124 | aux_light_color=0.5327 | aux_scene_critical=0.5475 | val: total=2.7329 | main=0.5228 | aux_core_bbox_visual=0.5729 | aux_light_color=0.5305 | aux_scene_critical=0.5516  (train/test full metrics off)
+epoch   4 [val  ] accuracy=0.7073 majority_acc=0.7119 precision=0.7689 recall=0.8418 specificity=0.3748 balanced_acc=0.6083 f1=0.8037 auc=0.6840 ap=0.8274 nll=0.6381 ece=0.1661 pmean=0.546 pstd=0.047
+epoch   4 [val branch AUC] aux_core_bbox_visual=0.5635 aux_scene_critical=0.5794 aux_light_color=0.7116
+epoch   4 [attn] core_bbox_visual=0.213 scene_critical=0.388 light_color=0.400 | entropy=0.958 | top1 share: 0.00 0.40 0.60
+epoch   5 | train: total=2.6800 | main=0.5075 | aux_core_bbox_visual=0.6081 | aux_light_color=0.5260 | aux_scene_critical=0.5432 | val: total=2.6394 | main=0.5159 | aux_core_bbox_visual=0.5613 | aux_light_color=0.5256 | aux_scene_critical=0.5480  (train/test full metrics off)
+epoch   5 [val  ] accuracy=0.7054 majority_acc=0.7119 precision=0.7809 recall=0.8147 specificity=0.4351 balanced_acc=0.6249 f1=0.7975 auc=0.6950 ap=0.8355 nll=0.6274 ece=0.1597 pmean=0.552 pstd=0.060
+epoch   5 [val branch AUC] aux_core_bbox_visual=0.5841 aux_scene_critical=0.5999 aux_light_color=0.7110
+epoch   5 [attn] core_bbox_visual=0.204 scene_critical=0.390 light_color=0.406 | entropy=0.952 | top1 share: 0.00 0.38 0.62
+epoch   6 | train: total=2.5814 | main=0.4939 | aux_core_bbox_visual=0.6002 | aux_light_color=0.5186 | aux_scene_critical=0.5385 | val: total=2.5516 | main=0.5105 | aux_core_bbox_visual=0.5534 | aux_light_color=0.5205 | aux_scene_critical=0.5444  (train/test full metrics off)
+epoch   6 [val  ] accuracy=0.7027 majority_acc=0.7119 precision=0.7891 recall=0.7947 specificity=0.4752 balanced_acc=0.6350 f1=0.7919 auc=0.6996 ap=0.8424 nll=0.6170 ece=0.1530 pmean=0.559 pstd=0.075
+epoch   6 [val branch AUC] aux_core_bbox_visual=0.5911 aux_scene_critical=0.6194 aux_light_color=0.7099
+epoch   6 [attn] core_bbox_visual=0.192 scene_critical=0.392 light_color=0.416 | entropy=0.942 | top1 share: 0.00 0.37 0.63
+epoch   7 | train: total=2.4903 | main=0.4830 | aux_core_bbox_visual=0.5974 | aux_light_color=0.5103 | aux_scene_critical=0.5332 | val: total=2.4706 | main=0.5061 | aux_core_bbox_visual=0.5565 | aux_light_color=0.5153 | aux_scene_critical=0.5406  (train/test full metrics off)
+epoch   7 [val  ] accuracy=0.7000 majority_acc=0.7119 precision=0.8000 recall=0.7714 specificity=0.5234 balanced_acc=0.6474 f1=0.7854 auc=0.7046 ap=0.8469 nll=0.6051 ece=0.1454 pmean=0.568 pstd=0.092
+epoch   7 [val branch AUC] aux_core_bbox_visual=0.5720 aux_scene_critical=0.6363 aux_light_color=0.7090
+epoch   7 [attn] core_bbox_visual=0.181 scene_critical=0.392 light_color=0.427 | entropy=0.932 | top1 share: 0.00 0.35 0.65
+epoch   8 | train: total=2.4030 | main=0.4745 | aux_core_bbox_visual=0.5826 | aux_light_color=0.5015 | aux_scene_critical=0.5278 | val: total=2.3963 | main=0.5052 | aux_core_bbox_visual=0.5549 | aux_light_color=0.5112 | aux_scene_critical=0.5371  (train/test full metrics off)
+epoch   8 [val  ] accuracy=0.6992 majority_acc=0.7119 precision=0.8081 recall=0.7573 specificity=0.5556 balanced_acc=0.6564 f1=0.7819 auc=0.7062 ap=0.8475 nll=0.5937 ece=0.1335 pmean=0.578 pstd=0.110
+epoch   8 [val branch AUC] aux_core_bbox_visual=0.5657 aux_scene_critical=0.6501 aux_light_color=0.7080
+epoch   8 [attn] core_bbox_visual=0.170 scene_critical=0.390 light_color=0.440 | entropy=0.919 | top1 share: 0.00 0.36 0.64
+epoch   9 | train: total=2.3243 | main=0.4677 | aux_core_bbox_visual=0.5841 | aux_light_color=0.4934 | aux_scene_critical=0.5226 | val: total=2.3287 | main=0.5077 | aux_core_bbox_visual=0.5489 | aux_light_color=0.5089 | aux_scene_critical=0.5338  (train/test full metrics off)
+epoch   9 [val  ] accuracy=0.6969 majority_acc=0.7119 precision=0.8114 recall=0.7481 specificity=0.5703 balanced_acc=0.6592 f1=0.7785 auc=0.7072 ap=0.8476 nll=0.5844 ece=0.1228 pmean=0.589 pstd=0.127
+epoch   9 [val branch AUC] aux_core_bbox_visual=0.5657 aux_scene_critical=0.6613 aux_light_color=0.7071
+epoch   9 [attn] core_bbox_visual=0.160 scene_critical=0.387 light_color=0.453 | entropy=0.906 | top1 share: 0.00 0.38 0.62
+epoch  10 | train: total=2.2501 | main=0.4628 | aux_core_bbox_visual=0.5797 | aux_light_color=0.4867 | aux_scene_critical=0.5178 | val: total=2.2673 | main=0.5122 | aux_core_bbox_visual=0.5456 | aux_light_color=0.5089 | aux_scene_critical=0.5310  (train/test full metrics off)
+epoch  10 [val  ] accuracy=0.6919 majority_acc=0.7119 precision=0.8122 recall=0.7378 specificity=0.5783 balanced_acc=0.6581 f1=0.7732 auc=0.7081 ap=0.8475 nll=0.5777 ece=0.1140 pmean=0.598 pstd=0.141
+epoch  10 [val branch AUC] aux_core_bbox_visual=0.5655 aux_scene_critical=0.6699 aux_light_color=0.7065
+epoch  10 [attn] core_bbox_visual=0.153 scene_critical=0.384 light_color=0.464 | entropy=0.895 | top1 share: 0.00 0.47 0.53
+epoch  11 | train: total=2.1818 | main=0.4596 | aux_core_bbox_visual=0.5756 | aux_light_color=0.4820 | aux_scene_critical=0.5135 | val: total=2.2094 | main=0.5165 | aux_core_bbox_visual=0.5427 | aux_light_color=0.5104 | aux_scene_critical=0.5285  (train/test full metrics off)
+epoch  11 [val  ] accuracy=0.6903 majority_acc=0.7119 precision=0.8140 recall=0.7324 specificity=0.5863 balanced_acc=0.6594 f1=0.7710 auc=0.7088 ap=0.8477 nll=0.5736 ece=0.1076 pmean=0.604 pstd=0.151
+epoch  11 [val branch AUC] aux_core_bbox_visual=0.5738 aux_scene_critical=0.6770 aux_light_color=0.7060
+epoch  11 [attn] core_bbox_visual=0.148 scene_critical=0.382 light_color=0.470 | entropy=0.888 | top1 share: 0.00 0.48 0.52
+epoch  12 | train: total=2.1183 | main=0.4571 | aux_core_bbox_visual=0.5748 | aux_light_color=0.4791 | aux_scene_critical=0.5098 | val: total=2.1542 | main=0.5191 | aux_core_bbox_visual=0.5430 | aux_light_color=0.5123 | aux_scene_critical=0.5262  (train/test full metrics off)
+epoch  12 [val  ] accuracy=0.6899 majority_acc=0.7119 precision=0.8158 recall=0.7291 specificity=0.5930 balanced_acc=0.6611 f1=0.7700 auc=0.7090 ap=0.8472 nll=0.5720 ece=0.1049 pmean=0.607 pstd=0.156
+epoch  12 [val branch AUC] aux_core_bbox_visual=0.5660 aux_scene_critical=0.6834 aux_light_color=0.7058
+epoch  12 [attn] core_bbox_visual=0.147 scene_critical=0.380 light_color=0.473 | entropy=0.886 | top1 share: 0.00 0.48 0.52
+epoch  13 | train: total=2.0593 | main=0.4561 | aux_core_bbox_visual=0.5690 | aux_light_color=0.4774 | aux_scene_critical=0.5066 | val: total=2.1011 | main=0.5205 | aux_core_bbox_visual=0.5438 | aux_light_color=0.5141 | aux_scene_critical=0.5242  (train/test full metrics off)
+epoch  13 [val  ] accuracy=0.6911 majority_acc=0.7119 precision=0.8180 recall=0.7281 specificity=0.5997 balanced_acc=0.6639 f1=0.7704 auc=0.7092 ap=0.8477 nll=0.5709 ece=0.1033 pmean=0.609 pstd=0.159
+epoch  13 [val branch AUC] aux_core_bbox_visual=0.5585 aux_scene_critical=0.6890 aux_light_color=0.7052
+epoch  13 [attn] core_bbox_visual=0.146 scene_critical=0.380 light_color=0.474 | entropy=0.885 | top1 share: 0.00 0.48 0.52
+epoch  14 | train: total=2.0037 | main=0.4545 | aux_core_bbox_visual=0.5682 | aux_light_color=0.4765 | aux_scene_critical=0.5037 | val: total=2.0511 | main=0.5220 | aux_core_bbox_visual=0.5453 | aux_light_color=0.5158 | aux_scene_critical=0.5225  (train/test full metrics off)
+epoch  14 [val  ] accuracy=0.6899 majority_acc=0.7119 precision=0.8185 recall=0.7254 specificity=0.6024 balanced_acc=0.6639 f1=0.7691 auc=0.7091 ap=0.8479 nll=0.5702 ece=0.1020 pmean=0.610 pstd=0.162
+epoch  14 [val branch AUC] aux_core_bbox_visual=0.5588 aux_scene_critical=0.6937 aux_light_color=0.7054
+epoch  14 [attn] core_bbox_visual=0.143 scene_critical=0.381 light_color=0.476 | entropy=0.881 | top1 share: 0.00 0.48 0.52
+epoch  15 | train: total=1.9510 | main=0.4528 | aux_core_bbox_visual=0.5661 | aux_light_color=0.4757 | aux_scene_critical=0.5011 | val: total=2.0035 | main=0.5226 | aux_core_bbox_visual=0.5472 | aux_light_color=0.5172 | aux_scene_critical=0.5209  (train/test full metrics off)
+epoch  15 [val  ] accuracy=0.6895 majority_acc=0.7119 precision=0.8191 recall=0.7237 specificity=0.6051 balanced_acc=0.6644 f1=0.7685 auc=0.7092 ap=0.8484 nll=0.5698 ece=0.1014 pmean=0.611 pstd=0.163
+epoch  15 [val branch AUC] aux_core_bbox_visual=0.5440 aux_scene_critical=0.6983 aux_light_color=0.7051
+epoch  15 [attn] core_bbox_visual=0.143 scene_critical=0.381 light_color=0.476 | entropy=0.881 | top1 share: 0.00 0.48 0.52
+epoch  16 | train: total=1.9022 | main=0.4517 | aux_core_bbox_visual=0.5647 | aux_light_color=0.4753 | aux_scene_critical=0.4989 | val: total=1.9582 | main=0.5230 | aux_core_bbox_visual=0.5447 | aux_light_color=0.5182 | aux_scene_critical=0.5197  (train/test full metrics off)
+epoch  16 [val  ] accuracy=0.6888 majority_acc=0.7119 precision=0.8209 recall=0.7199 specificity=0.6118 balanced_acc=0.6659 f1=0.7671 auc=0.7087 ap=0.8488 nll=0.5696 ece=0.1012 pmean=0.611 pstd=0.164
+epoch  16 [val branch AUC] aux_core_bbox_visual=0.5478 aux_scene_critical=0.7018 aux_light_color=0.7051
+epoch  16 [attn] core_bbox_visual=0.142 scene_critical=0.382 light_color=0.476 | entropy=0.880 | top1 share: 0.00 0.48 0.52
+[lr] epoch  16: ReduceLROnPlateau 1.000e-05 -> 5.000e-06 (takes effect from epoch 17)
+epoch  17 | train: total=1.8684 | main=0.4518 | aux_core_bbox_visual=0.5639 | aux_light_color=0.4751 | aux_scene_critical=0.4971 | val: total=1.9368 | main=0.5234 | aux_core_bbox_visual=0.5452 | aux_light_color=0.5187 | aux_scene_critical=0.5190  (train/test full metrics off)
+epoch  17 [val  ] accuracy=0.6884 majority_acc=0.7119 precision=0.8212 recall=0.7189 specificity=0.6131 balanced_acc=0.6660 f1=0.7666 auc=0.7086 ap=0.8491 nll=0.5695 ece=0.1011 pmean=0.611 pstd=0.165
+epoch  17 [val branch AUC] aux_core_bbox_visual=0.5463 aux_scene_critical=0.7035 aux_light_color=0.7051
+epoch  17 [attn] core_bbox_visual=0.142 scene_critical=0.383 light_color=0.476 | entropy=0.880 | top1 share: 0.00 0.48 0.52
+epoch  18 | train: total=1.8463 | main=0.4512 | aux_core_bbox_visual=0.5640 | aux_light_color=0.4749 | aux_scene_critical=0.4962 | val: total=1.9165 | main=0.5238 | aux_core_bbox_visual=0.5464 | aux_light_color=0.5193 | aux_scene_critical=0.5185  (train/test full metrics off)
+epoch  18 [val  ] accuracy=0.6876 majority_acc=0.7119 precision=0.8217 recall=0.7167 specificity=0.6158 balanced_acc=0.6662 f1=0.7656 auc=0.7088 ap=0.8493 nll=0.5692 ece=0.1009 pmean=0.611 pstd=0.167
+epoch  18 [val branch AUC] aux_core_bbox_visual=0.5481 aux_scene_critical=0.7049 aux_light_color=0.7053
+epoch  18 [attn] core_bbox_visual=0.141 scene_critical=0.383 light_color=0.476 | entropy=0.878 | top1 share: 0.00 0.47 0.53
+epoch  19 | train: total=1.8253 | main=0.4509 | aux_core_bbox_visual=0.5647 | aux_light_color=0.4747 | aux_scene_critical=0.4952 | val: total=1.8959 | main=0.5237 | aux_core_bbox_visual=0.5459 | aux_light_color=0.5196 | aux_scene_critical=0.5180  (train/test full metrics off)
+epoch  19 [val  ] accuracy=0.6872 majority_acc=0.7119 precision=0.8212 recall=0.7167 specificity=0.6145 balanced_acc=0.6656 f1=0.7654 auc=0.7086 ap=0.8495 nll=0.5694 ece=0.1013 pmean=0.611 pstd=0.167
+epoch  19 [val branch AUC] aux_core_bbox_visual=0.5506 aux_scene_critical=0.7064 aux_light_color=0.7056
+epoch  19 [attn] core_bbox_visual=0.141 scene_critical=0.384 light_color=0.476 | entropy=0.879 | top1 share: 0.00 0.47 0.53
+epoch  20 | train: total=1.8034 | main=0.4501 | aux_core_bbox_visual=0.5592 | aux_light_color=0.4746 | aux_scene_critical=0.4946 | val: total=1.8765 | main=0.5239 | aux_core_bbox_visual=0.5461 | aux_light_color=0.5199 | aux_scene_critical=0.5175  (train/test full metrics off)
+epoch  20 [val  ] accuracy=0.6884 majority_acc=0.7119 precision=0.8224 recall=0.7172 specificity=0.6171 balanced_acc=0.6672 f1=0.7662 auc=0.7083 ap=0.8496 nll=0.5694 ece=0.1013 pmean=0.611 pstd=0.167
+epoch  20 [val branch AUC] aux_core_bbox_visual=0.5504 aux_scene_critical=0.7076 aux_light_color=0.7059
+epoch  20 [attn] core_bbox_visual=0.140 scene_critical=0.385 light_color=0.475 | entropy=0.878 | top1 share: 0.00 0.47 0.53
+epoch  21 | train: total=1.7842 | main=0.4504 | aux_core_bbox_visual=0.5588 | aux_light_color=0.4745 | aux_scene_critical=0.4938 | val: total=1.8578 | main=0.5241 | aux_core_bbox_visual=0.5469 | aux_light_color=0.5203 | aux_scene_critical=0.5171  (train/test full metrics off)
+epoch  21 [val  ] accuracy=0.6895 majority_acc=0.7119 precision=0.8247 recall=0.7161 specificity=0.6238 balanced_acc=0.6700 f1=0.7666 auc=0.7081 ap=0.8497 nll=0.5693 ece=0.1012 pmean=0.611 pstd=0.168
+epoch  21 [val branch AUC] aux_core_bbox_visual=0.5507 aux_scene_critical=0.7087 aux_light_color=0.7051
+epoch  21 [attn] core_bbox_visual=0.140 scene_critical=0.385 light_color=0.475 | entropy=0.878 | top1 share: 0.00 0.47 0.53
+[lr] epoch  21: ReduceLROnPlateau 5.000e-06 -> 2.500e-06 (takes effect from epoch 22)
+epoch  22 | train: total=1.7684 | main=0.4496 | aux_core_bbox_visual=0.5545 | aux_light_color=0.4744 | aux_scene_critical=0.4933 | val: total=1.8485 | main=0.5240 | aux_core_bbox_visual=0.5472 | aux_light_color=0.5204 | aux_scene_critical=0.5169  (train/test full metrics off)
+epoch  22 [val  ] accuracy=0.6895 majority_acc=0.7119 precision=0.8251 recall=0.7156 specificity=0.6252 balanced_acc=0.6704 f1=0.7665 auc=0.7082 ap=0.8498 nll=0.5694 ece=0.1015 pmean=0.610 pstd=0.168
+epoch  22 [val branch AUC] aux_core_bbox_visual=0.5507 aux_scene_critical=0.7092 aux_light_color=0.7051
+epoch  22 [attn] core_bbox_visual=0.139 scene_critical=0.385 light_color=0.475 | entropy=0.878 | top1 share: 0.00 0.47 0.53
+epoch  23 | train: total=1.7601 | main=0.4503 | aux_core_bbox_visual=0.5569 | aux_light_color=0.4743 | aux_scene_critical=0.4929 | val: total=1.8393 | main=0.5240 | aux_core_bbox_visual=0.5473 | aux_light_color=0.5205 | aux_scene_critical=0.5167  (train/test full metrics off)
+epoch  23 [val  ] accuracy=0.6895 majority_acc=0.7119 precision=0.8255 recall=0.7151 specificity=0.6265 balanced_acc=0.6708 f1=0.7663 auc=0.7082 ap=0.8500 nll=0.5694 ece=0.1016 pmean=0.610 pstd=0.168
+epoch  23 [val branch AUC] aux_core_bbox_visual=0.5511 aux_scene_critical=0.7097 aux_light_color=0.7051
+epoch  23 [attn] core_bbox_visual=0.139 scene_critical=0.386 light_color=0.475 | entropy=0.878 | top1 share: 0.00 0.47 0.53
+Wrote history to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\history.pkl
+encoder seq length: 15
+L2 reg term now: 1.0455480813980103
+decoder seq length: 15
+model input shapes: [TensorShape([None, 15, 7, 7, 512]), TensorShape([None, 15, 24])]
+Model + configs saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit
+[note] per-epoch metrics below use seq_overlap_rate=0.5 (training overlap) -- NOT comparable to the overlap=1 final evaluation numbers below.
+
+========================================================================================================================================================================================================================================================================================================================
+FULL PER-EPOCH METRICS (from history.pkl -- Keras' own History callback)
+========================================================================================================================================================================================================================================================================================================================
+ epoch          loss      val_lossdecoder_dense_lossaux_core_bbox_visual_lossaux_scene_critical_lossaux_light_color_lossdecoder_dense_accuracyval_decoder_dense_lossval_aux_core_bbox_visual_lossval_aux_scene_critical_lossval_aux_light_color_lossval_decoder_dense_accuracy       val_nll       val_auc            lr
+     1        3.1196        3.0522        0.5703        0.6456        0.5573        0.5476        0.4511        0.5582        0.6139        0.5621        0.5420        0.5935        0.6785        0.4152         1e-05
+     2        3.0005        2.9391        0.5521        0.6289        0.5542        0.5434        0.5457        0.5442        0.5953        0.5584        0.5388        0.6949        0.6637        0.5626         1e-05
+     3        2.8866        2.8334        0.5349        0.6158        0.5510        0.5385        0.6430        0.5328        0.5840        0.5550        0.5350        0.7023        0.6506        0.6476         1e-05
+     4        2.7803        2.7329        0.5200        0.6124        0.5475        0.5327        0.6932        0.5228        0.5729        0.5516        0.5305        0.7073        0.6381        0.6840         1e-05
+     5        2.6800        2.6394        0.5075        0.6081        0.5432        0.5260        0.7144        0.5159        0.5613        0.5480        0.5256        0.7054        0.6274        0.6950         1e-05
+     6        2.5814        2.5516        0.4939        0.6002        0.5385        0.5186        0.7282        0.5105        0.5534        0.5444        0.5205        0.7027        0.6170        0.6996         1e-05
+     7        2.4903        2.4706        0.4830        0.5974        0.5332        0.5103        0.7335        0.5061        0.5565        0.5406        0.5153        0.7000        0.6051        0.7046         1e-05
+     8        2.4030        2.3963        0.4745        0.5826        0.5278        0.5015        0.7343        0.5052        0.5549        0.5371        0.5112        0.6992        0.5937        0.7062         1e-05
+     9        2.3243        2.3287        0.4677        0.5841        0.5226        0.4934        0.7371        0.5077        0.5489        0.5338        0.5089        0.6969        0.5844        0.7072         1e-05
+    10        2.2501        2.2673        0.4628        0.5797        0.5178        0.4867        0.7382        0.5122        0.5456        0.5310        0.5089        0.6919        0.5777        0.7081         1e-05
+    11        2.1818        2.2094        0.4596        0.5756        0.5135        0.4820        0.7368        0.5165        0.5427        0.5285        0.5104        0.6903        0.5736        0.7088         1e-05
+    12        2.1183        2.1542        0.4571        0.5748        0.5098        0.4791        0.7358        0.5191        0.5430        0.5262        0.5123        0.6899        0.5720        0.7090         1e-05
+    13        2.0593        2.1011        0.4561        0.5690        0.5066        0.4774        0.7377        0.5205        0.5438        0.5242        0.5141        0.6911        0.5709        0.7092         1e-05
+    14        2.0037        2.0511        0.4545        0.5682        0.5037        0.4765        0.7360        0.5220        0.5453        0.5225        0.5158        0.6899        0.5702        0.7091         1e-05
+    15        1.9510        2.0035        0.4528        0.5661        0.5011        0.4757        0.7367        0.5226        0.5472        0.5209        0.5172        0.6895        0.5698        0.7092         1e-05
+    16        1.9022        1.9582        0.4517        0.5647        0.4989        0.4753        0.7397        0.5230        0.5447        0.5197        0.5182        0.6888        0.5696        0.7087         1e-05
+    17        1.8684        1.9368        0.4518        0.5639        0.4971        0.4751        0.7376        0.5234        0.5452        0.5190        0.5187        0.6884        0.5695        0.7086         5e-06
+    18        1.8463        1.9165        0.4512        0.5640        0.4962        0.4749        0.7404        0.5238        0.5464        0.5185        0.5193        0.6876        0.5692        0.7088         5e-06
+    19        1.8253        1.8959        0.4509        0.5647        0.4952        0.4747        0.7374        0.5237        0.5459        0.5180        0.5196        0.6872        0.5694        0.7086         5e-06
+    20        1.8034        1.8765        0.4501        0.5592        0.4946        0.4746        0.7399        0.5239        0.5461        0.5175        0.5199        0.6884        0.5694        0.7083         5e-06
+    21        1.7842        1.8578        0.4504        0.5588        0.4938        0.4745        0.7378        0.5241        0.5469        0.5171        0.5203        0.6895        0.5693        0.7081         5e-06
+    22        1.7684        1.8485        0.4496        0.5545        0.4933        0.4744        0.7395        0.5240        0.5472        0.5169        0.5204        0.6895        0.5694        0.7082       2.5e-06
+    23        1.7601        1.8393        0.4503        0.5569        0.4929        0.4743        0.7390        0.5240        0.5473        0.5167        0.5205        0.6895        0.5694        0.7082       2.5e-06
+========================================================================================================================================================================================================================================================================================================================
+
+>>> Full per-split evaluation (train, val, test)
+    Re-runs the BEST checkpoint over each split at overlap=1, saving predictions + full metrics to disk. This is the authoritative number for the run, not the per-epoch numbers printed during training.
+
+>>> Final evaluation on the 'train' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,997,316 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\ped_intents_train.pkl
+[note] 'train' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[train] metrics at threshold=0.5 -- accuracy: 0.7456  F1: 0.8158
+[train] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_train.json
+  accuracy: 0.7455887676882152
+  majority_acc: 0.7135414207237412
+  precision: 0.8437875680644933
+  recall: 0.7896408717903468
+  specificity: 0.6358591131380845
+  balanced_acc: 0.7127499924642157
+  f1: 0.8158167625776309
+  roc_auc: 0.7948718600779319
+  pr_auc: 0.9021655946383417
+  nll: 0.5319282437216922
+  ece: 0.1132574877552101
+  brier_score: 0.17549190539110385
+  confusion_matrix: [[11572, 6627], [9536, 35796]]
+  n_test_samples: 63531
+  positive_rate_gt: 0.7135414207237412
+  threshold_used: 0.5
+
+>>> Final evaluation on the 'val' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,997,316 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\ped_intents_val.pkl
+[note] 'val' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[val] metrics at threshold=0.5 -- accuracy: 0.6911  F1: 0.7704
+[val] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_val.json
+  accuracy: 0.6911079943899018
+  majority_acc: 0.7109116409537167
+  precision: 0.8169674451521586
+  recall: 0.7287720959595959
+  specificity: 0.5984863186493304
+  balanced_acc: 0.6636292073044632
+  f1: 0.7703536870203537
+  roc_auc: 0.7107228866140544
+  pr_auc: 0.8483118747556541
+  nll: 0.5702787614986022
+  ece: 0.10210831220989307
+  brier_score: 0.1933893106432997
+  confusion_matrix: [[3084, 2069], [3437, 9235]]
+  n_test_samples: 17825
+  positive_rate_gt: 0.7109116409537167
+  threshold_used: 0.5
+
+>>> Final evaluation on the 'test' split
+    Reloads the BEST saved checkpoint (not necessarily the last training epoch) and runs it once over every window of this split. Default overlap is 1. Pass overlap_override=0.5 to match the training windows. Neither sentence is the paper's protocol by itself. -- independent of the lighter per-epoch metrics printed during training, which used a different overlap and the in-progress (not necessarily best) weights.
+    Model loaded: 1,997,316 params
+Wrote predictions to D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\ped_intents_test.pkl
+[note] 'test' below uses overlap=1, not seq_overlap_rate=0.5 used during training. Neither overlap is, by itself, the paper's protocol. Expect different sample counts than the per-epoch table above.
+[test] metrics at threshold=0.5 -- accuracy: 0.7941  F1: 0.8717
+[test] full metrics (threshold=0.50) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_test.json
+  accuracy: 0.7940633033419023
+  majority_acc: 0.8211760925449871
+  precision: 0.8923612890004611
+  recall: 0.8519859127372335
+  specificity: 0.5280772686433064
+  balanced_acc: 0.6900315906902699
+  f1: 0.8717063283537272
+  roc_auc: 0.7738980281835788
+  pr_auc: 0.9331048132888103
+  nll: 0.48080168946463975
+  ece: 0.1656633972179547
+  brier_score: 0.15236396674375693
+  confusion_matrix: [[4702, 4202], [6052, 34836]]
+  n_test_samples: 49792
+  positive_rate_gt: 0.8211760925449871
+  threshold_used: 0.5
+
+>>> Threshold calibration
+    Sweeps decision thresholds 0.05-0.95 and picks the one that maximizes F1 -- using VAL labels ONLY, never test -- since picking a threshold on test would leak test information into the reported numbers.
+[calibration] best threshold on val = 0.39 (val f1 = 0.8316)
+
+>>> Recomputing all splits at the calibrated threshold
+    Applies the val-selected threshold to predictions already saved above -- no re-inference, just re-thresholding the same probabilities, so this step is fast.
+[train] CALIBRATED metrics (threshold=0.39) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_train_calibrated.json
+  accuracy: 0.7118729439171428
+  majority_acc: 0.7135414207237412
+  precision: 0.7155435042666879
+  recall: 0.9896099885290743
+  specificity: 0.020056047035551403
+  balanced_acc: 0.5048330177823128
+  f1: 0.8305516213539208
+  roc_auc: 0.7948718600779319
+  pr_auc: 0.9021655946383417
+  nll: 0.5319282437216922
+  ece: 0.1132574877552101
+  brier_score: 0.17549190539110385
+  confusion_matrix: [[365, 17834], [471, 44861]]
+  n_test_samples: 63531
+  positive_rate_gt: 0.7135414207237412
+  threshold_used: 0.39000000000000007
+[val] CALIBRATED metrics (threshold=0.39) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_val_calibrated.json
+  accuracy: 0.7156802244039271
+  majority_acc: 0.7109116409537167
+  precision: 0.7182047750229569
+  recall: 0.9875315656565656
+  specificity: 0.04715699592470406
+  balanced_acc: 0.5173442807906349
+  f1: 0.83160552897395
+  roc_auc: 0.7107228866140544
+  pr_auc: 0.8483118747556541
+  nll: 0.5702787614986022
+  ece: 0.10210831220989307
+  brier_score: 0.1933893106432997
+  confusion_matrix: [[243, 4910], [158, 12514]]
+  n_test_samples: 17825
+  positive_rate_gt: 0.7109116409537167
+  threshold_used: 0.39000000000000007
+[test] CALIBRATED metrics (threshold=0.39) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_test_calibrated.json
+  accuracy: 0.8196899100257069
+  majority_acc: 0.8211760925449871
+  precision: 0.8223492807499596
+  recall: 0.9954754451183722
+  specificity: 0.012466307277628033
+  balanced_acc: 0.5039708761980001
+  f1: 0.9006682598690033
+  roc_auc: 0.7738980281835788
+  pr_auc: 0.9331048132888103
+  nll: 0.48080168946463975
+  ece: 0.1656633972179547
+  brier_score: 0.15236396674375693
+  confusion_matrix: [[111, 8793], [185, 40703]]
+  n_test_samples: 49792
+  positive_rate_gt: 0.8211760925449871
+  threshold_used: 0.39000000000000007
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_plots\loss_curve.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_plots\epoch_curves.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_plots\metrics_comparison_thresh05.png
+[plot_metrics] saved -> D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_plots\metrics_comparison_calibrated.png
+
+======================================================================
+SUMMARY -- ALL SPLITS (threshold=0.5)
+[note] overlap=1 for all splits above -- not comparable to per-epoch val/test numbers printed during training (seq_overlap_rate=0.5).
+======================================================================
+            metric       train         val        test
+          accuracy      0.7456      0.6911      0.7941
+      majority_acc      0.7135      0.7109      0.8212
+         precision      0.8438      0.8170      0.8924
+            recall      0.7896      0.7288      0.8520
+       specificity      0.6359      0.5985      0.5281
+      balanced_acc      0.7127      0.6636      0.6900
+                f1      0.8158      0.7704      0.8717
+           roc_auc      0.7949      0.7107      0.7739
+            pr_auc      0.9022      0.8483      0.9331
+               nll      0.5319      0.5703      0.4808
+               ece      0.1133      0.1021      0.1657
+       brier_score      0.1755      0.1934      0.1524
+  positive_rate_gt      0.7135      0.7109      0.8212
+    threshold_used      0.5000      0.5000      0.5000
+
+======================================================================
+SUMMARY -- ALL SPLITS (calibrated threshold=0.39)
+[note] same overlap=1 predictions, re-thresholded with the val-selected threshold 0.39.
+======================================================================
+            metric       train         val        test
+          accuracy      0.7119      0.7157      0.8197
+      majority_acc      0.7135      0.7109      0.8212
+         precision      0.7155      0.7182      0.8223
+            recall      0.9896      0.9875      0.9955
+       specificity      0.0201      0.0472      0.0125
+      balanced_acc      0.5048      0.5173      0.5040
+                f1      0.8306      0.8316      0.9007
+           roc_auc      0.7949      0.7107      0.7739
+            pr_auc      0.9022      0.8483      0.9331
+               nll      0.5319      0.5703      0.4808
+               ece      0.1133      0.1021      0.1657
+       brier_score      0.1755      0.1934      0.1524
+  positive_rate_gt      0.7135      0.7109      0.8212
+    threshold_used      0.3900      0.3900      0.3900
+[train] PRIOR-CORRECTED metrics (pos_weight=0.3762) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_train_priorcorrected.json
+  accuracy: 0.7135414207237412
+  majority_acc: 0.7135414207237412
+  precision: 0.7135414207237412
+  recall: 1.0
+  specificity: 0.0
+  balanced_acc: 0.5
+  f1: 0.8328265801971285
+  roc_auc: 0.7948718600779319
+  pr_auc: 0.9021655946383417
+  nll: 0.5240087079032991
+  ece: 0.09964374968360076
+  brier_score: 0.17829377057294266
+  confusion_matrix: [[0, 18199], [0, 45332]]
+  n_test_samples: 63531
+  positive_rate_gt: 0.7135414207237412
+  threshold_used: 0.5
+[val] PRIOR-CORRECTED metrics (pos_weight=0.3762) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_val_priorcorrected.json
+  accuracy: 0.7109116409537167
+  majority_acc: 0.7109116409537167
+  precision: 0.7109116409537167
+  recall: 1.0
+  specificity: 0.0
+  balanced_acc: 0.5
+  f1: 0.8310325605797292
+  roc_auc: 0.7107228866140544
+  pr_auc: 0.8483118747556541
+  nll: 0.564428308106231
+  ece: 0.08539238223666246
+  brier_score: 0.1908084953598764
+  confusion_matrix: [[0, 5153], [0, 12672]]
+  n_test_samples: 17825
+  positive_rate_gt: 0.7109116409537167
+  threshold_used: 0.5
+[test] PRIOR-CORRECTED metrics (pos_weight=0.3762) saved to: D:\PIE codes\PIE_dataset\experiments\tensorflow\branchattn_temporal\aD_BAttnT4_bbox_context_scene_critical_light_color_defaultSplit\metrics_test_priorcorrected.json
+  accuracy: 0.8211760925449871
+  majority_acc: 0.8211760925449871
+  precision: 0.8211760925449871
+  recall: 1.0
+  specificity: 0.0
+  balanced_acc: 0.5
+  f1: 0.901808557565064
+  roc_auc: 0.7738980281835788
+  pr_auc: 0.9331048132888103
+  nll: 0.40737350001524664
+  ece: 0.05051239907166342
+  brier_score: 0.1277818749832065
+  confusion_matrix: [[0, 8904], [0, 40888]]
+  n_test_samples: 49792
+  positive_rate_gt: 0.8211760925449871
+  threshold_used: 0.5
+
+======================================================================
+SUMMARY -- ALL SPLITS (prior-corrected, pos_weight=0.3762)
+[note] same predictions, probabilities mapped back to the natural class prior. AUC is unchanged; accuracy/NLL/ECE are now comparable with majority_acc.
+======================================================================
+            metric       train         val        test
+          accuracy      0.7135      0.7109      0.8212
+      majority_acc      0.7135      0.7109      0.8212
+         precision      0.7135      0.7109      0.8212
+            recall      1.0000      1.0000      1.0000
+       specificity      0.0000      0.0000      0.0000
+      balanced_acc      0.5000      0.5000      0.5000
+                f1      0.8328      0.8310      0.9018
+           roc_auc      0.7949      0.7107      0.7739
+            pr_auc      0.9022      0.8483      0.9331
+               nll      0.5240      0.5644      0.4074
+               ece      0.0996      0.0854      0.0505
+       brier_score      0.1783      0.1908      0.1278
+  positive_rate_gt      0.7135      0.7109      0.8212
+    threshold_used      0.5000      0.5000      0.5000
+[threshold] train positive rate: tracks=0.7267 windows(overlap=1)=0.7135
+[threshold] decision_threshold=0.5: raw@0.5 and prior-corrected@0.5 are already reported above.

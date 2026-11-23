@@ -1308,22 +1308,11 @@ def compute_full_metrics(y_true, y_prob, save_path=None, threshold=0.5):
     return metrics
 
 def print_full_epoch_metrics_table(epoch_metrics_path):
-    """
-    Unlike `print_full_history_table` (which only includes the columns present in
-   `history.pkl`—i.e., the raw Keras History output: 
-   loss/accuracy/val_loss/val_accuracy/val_auc), this function reads directly
-     from `epoch_metrics.json`—the same file that
-       `EpochMetricsTable._save_history()` in `pie_intent.py` writes at each epoch,
-         containing all metrics (precision/recall/f1/auc/nll/ece/...) for all three
-           sets: train, val, and test.
-    """
     if not os.path.exists(epoch_metrics_path):
         print(f"[warning] epoch metrics file not found at {epoch_metrics_path} -- nothing to print.")
         return
-
     with open(epoch_metrics_path, 'r', encoding='utf-8') as fid:
         records = json.load(fid)
-
     if not records:
         print("[warning] epoch_metrics.json is empty -- nothing to print.")
         return
@@ -1331,58 +1320,49 @@ def print_full_epoch_metrics_table(epoch_metrics_path):
     METRIC_NAMES = ['loss', 'accuracy', 'majority_acc', 'precision', 'recall',
                     'specificity', 'balanced_acc',
                     'f1', 'roc_auc', 'pr_auc', 'nll', 'ece', 'brier_score']
-
     splits = ['train', 'val', 'test']
-    col_width = 12
 
-    header = "epoch".rjust(6)
-    for split in splits:
-        for m in METRIC_NAMES:
-            header += f"{split[:2]}_{m}"[:col_width].rjust(col_width)
-
-    print("\n" + "=" * len(header))
+    print("\n" + "=" * 80)
     print("FULL PER-EPOCH METRICS -- TRAIN / VAL / TEST (from epoch_metrics.json)")
-    print("=" * len(header))
-    print(header)
+    print("=" * 80)
 
     for rec in records:
-        row = str(rec['epoch']).rjust(6)
+        print(f"\nepoch {rec['epoch']:>4}")
         for split in splits:
+            print(f"  {split:5}:", end="")
             for m in METRIC_NAMES:
                 key = f'{split}_{m}'
                 v = rec.get(key)
-                row += f"{v:>{col_width}.4f}" if isinstance(v, (int, float)) else f"{'--':>{col_width}}"
-        print(row)
-    print("=" * len(header))
+                if isinstance(v, (int, float)):
+                    print(f" {m}={v:.4f}", end="")
+                else:
+                    print(f" {m}=--", end="")
+            print()
+    print("=" * 80)
+
 
 def print_full_history_table(history_dict):
-
     if not history_dict:
         print("[warning] history dict is empty -- nothing to print.")
         return
-
     metric_keys = ['loss', 'val_loss'] + [
         k for k in history_dict.keys()
         if k not in ('loss', 'val_loss')
     ]
     n_epochs_ran = len(history_dict['loss'])
 
-    col_width = 14
-    header = "epoch".rjust(6) + "".join(k.rjust(col_width) for k in metric_keys)
-    print("\n" + "=" * len(header))
+    print("\n" + "=" * 80)
     print("FULL PER-EPOCH METRICS (from history.pkl -- Keras' own History callback)")
-    print("=" * len(header))
-    print(header)
+    print("=" * 80)
     for e in range(n_epochs_ran):
-        row = str(e + 1).rjust(6)
+        print(f"\nepoch {e + 1:>4}")
         for k in metric_keys:
             v = history_dict[k][e]
             if isinstance(v, (int, float)):
-                row += f"{v:>{col_width}.4f}"
+                print(f"  {k:30} = {v:.4f}")
             else:
-                row += f"{str(v):>{col_width}}"
-        print(row)
-    print("=" * len(header))
+                print(f"  {k:30} = {v}")
+    print("=" * 80)
 
 # ------------------------------------------------------------------
 # Balance-mode preset resolution
