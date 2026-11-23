@@ -722,7 +722,13 @@ class PIEIntent(object):
                             'data_type': data_type,
                             'overlap': data_opts['seq_overlap_rate'],
                             'dataset': 'pie'}
-            
+            if "intention_3class" in data_opts["output_type"]:
+                self._decoder_dense_output_size = 3
+                self._head_activation = "softmax"
+                print("[task] 3-class intention. Loss must be categorical_crossentropy.")
+            else:
+                self._decoder_dense_output_size = 1
+                self._head_activation = "sigmoid"
             self._model_type = 'convlstm_encdec'
             seq_length = data_opts['max_size_observe']
             train_d = self.get_train_val_data(data_train, data_type, seq_length, data_opts['seq_overlap_rate'],

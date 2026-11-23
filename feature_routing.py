@@ -29,7 +29,7 @@ use_visual=False -> decoder-only model, no VGG16 input at all.
 import numpy as np
 import tensorflow as tf
 from keras.layers import (Concatenate, ConvLSTM2D, Dense, Dropout, Flatten, Input, LSTM,
-                          RepeatVector, Conv2D, TimeDistributed)
+                          RepeatVector, Conv2D, TimeDistributed,Add, Multiply)
 from keras.models import Model
 from visual_norm import ChannelStandardize, visual_op_order
 from utils import PIE_IMG_WIDTH, PIE_IMG_HEIGHT
@@ -306,11 +306,12 @@ def _build_decoder_only(intent):
         activation=intent._activation,
         recurrent_activation=intent._lstm_recurrent_activation,
         name='decoder_network')(dec_in)
+    head_act = getattr(intent, "_head_activation", "sigmoid")
     output = Dense(
-        intent._decoder_dense_output_size, activation='sigmoid',
+        intent._decoder_dense_output_size, activation=head_act,
         kernel_regularizer=intent._kernel_regularizer,
         bias_regularizer=intent._bias_regularizer,
-        name='decoder_dense')(hidden)
+        name="decoder_dense")(hidden)
     print(f"[config] decoder-only model: decoder_width={width}")
     return Model(inputs=dec_in, outputs=output, name='model')
 
@@ -344,6 +345,14 @@ def build_intention_model(intent):
         maps = maps_in
 
     vn = getattr(intent, 'visual_norm', None)
+
+    channels = int(maps.shape[-1])
+    if channels != 512:
+        maps = TimeDistributed(
+            Conv2D(512, 1, name="backbone_to_512"),
+            name="backbone_project")(maps)
+        print(f"[visual] 1x1 projection {channels} -> 512 before ConvLSTM. "
+            "Report these parameters; the downstream graph is then the VGG-sized graph.")
     if getattr(intent, 'zero_visual', False):
         vn = None
     cap = getattr(intent, 'capacity', None) or {}
@@ -517,10 +526,34 @@ def build_intention_model(intent):
                 names.append(feat_name)
             if len(branches) == 1:
                 hidden = core
+            elif mode == "gated_add":
+                repeated = RepeatVector(intent._decoder_seq_length)(visual)
+                core = LSTM(name="core_decoder", **lstm_kw)(
+                    Concatenate(axis=2, name="core_concat")([repeated, bbox]))
+                parts, names = [], ["core_bbox_visual"]
+                for feat_name, start, end in spans:
+                    if feat_name == "bbox":
+                        continue
+                    parts.append(SliceColumns(start, end, name=f"slice_{feat_name}")(dec_in))
+                    names.append(feat_name)
+                if not parts:
+                    hidden = core
+                    intent.branch_names = names
+                else:
+                    rel_in = parts[0] if len(parts) == 1 else Concatenate(axis=2, name="relation_concat")(parts)
+                    rel_seq = LSTM(name="relation_lstm", return_sequences=True, **extra_kw)(rel_in)
+                    rel = AdditiveTemporalAttention(name="relation_tattn")(rel_seq)
+                    gate = Dense(1, activation="sigmoid", name="rel_gate")(core)
+                    hidden = Add(name="core_plus_rel")([core, Multiply(name="gated_rel")([gate, rel])])
+                    intent.branch_names = ["core_bbox_visual", "relation"]
+                    print("[config] gated_add: one relation LSTM sees the concatenated extras. "
+                        "Softmax does not drop them. Aux heads, if on, are only core and relation.")
             else:
                 hidden, attn_weights = BranchAttnPool(
                     len(branches), return_weights=True, name='branch_attention')(branches)
             intent.branch_names = names
+
+
 
         else:
             raise ValueError(f'unknown branch_mode: {mode!r}')
@@ -533,7 +566,7 @@ def build_intention_model(intent):
     use_aux_loss = getattr(intent, 'use_aux_loss', False)
     aux_outputs = []
     if use_aux_loss and fusion in ('branchattn', 'branchattn_temporal'):
-        # هر شاخه قبل از pooling یک head جداگانه می‌گیرد
+
         for i, branch in enumerate(branches):
             aux = Dense(
                 intent._decoder_dense_output_size,
@@ -544,11 +577,12 @@ def build_intention_model(intent):
             )(branch)
             aux_outputs.append(aux)
 
+    head_act = getattr(intent, "_head_activation", "sigmoid")
     output = Dense(
-        intent._decoder_dense_output_size, activation='sigmoid',
+        intent._decoder_dense_output_size, activation=head_act,
         kernel_regularizer=intent._kernel_regularizer,
         bias_regularizer=intent._bias_regularizer,
-        name='decoder_dense')(hidden)
+        name="decoder_dense")(hidden)
 
     if aux_outputs:
         model = Model(

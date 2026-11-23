@@ -929,3 +929,43 @@ def attach_flow_critical(beh_seq, flow_root, key='flow_critical', verbose=True):
         print(f'[flow_critical] tracks without data {missing_tracks}/{len(out)}; '
               f'invalid frames {zero_frames}/{total} ({100 * zero_frames / max(total, 1):.1f}%)')
     return beh_seq
+
+def relation_to_sidewalk(label_map, bbox, xy, ok, lower_flow_xy, prev_ankle_xy, scale):
+    """Four numbers in the sidewalk frame, plus validity. Does not zero the geometry
+    of one cue because another cue is missing.
+      0 signed distance of the foot point to the nearest sidewalk pixel, in bbox heights
+      1 cosine of the ankle step with the sidewalk normal, or 0 if the step is missing
+      2 cosine of ego-compensated lower-body flow / bbox height with that normal
+      3 1 only when the normal and both ankles exist
+    """
+    out = np.zeros(4, np.float32)
+    x1, y1, x2, y2 = [v * scale for v in bbox]
+    h = max(y2 - y1, 1.0)
+    foot = np.array([0.5 * (x1 + x2), y2], np.float32)
+    H, W = label_map.shape
+    r = int(max(8.0, 2.0 * h))
+    xa, xb = max(0, int(foot[0]) - r), min(W, int(foot[0]) + r)
+    ya, yb = max(0, int(foot[1]) - r), min(H, int(foot[1]) + r)
+    window = label_map[ya:yb, xa:xb]
+    ys, xs = np.where(window == 1)  # Cityscapes trainId sidewalk
+    if len(xs) == 0:
+        return out
+    pts = np.stack([xs + xa, ys + ya], axis=1).astype(np.float32)
+    nearest = pts[np.argmin(np.sum((pts - foot) ** 2, axis=1))]
+    delta = foot - nearest
+    dist = float(np.linalg.norm(delta))
+    normal = delta / dist if dist > 1.0 else np.zeros(2, np.float32)
+    out[0] = dist / h
+    ankles_ok = bool(ok[15] and ok[16]) if ok is not None else False
+    if prev_ankle_xy is not None and ankles_ok and np.linalg.norm(normal) > 0:
+        step = xy[15] - prev_ankle_xy
+        nstep = float(np.linalg.norm(step))
+        if nstep > 1e-3:
+            out[1] = float(np.dot(step / nstep, normal))
+    if lower_flow_xy is not None and np.linalg.norm(normal) > 0:
+        flow = np.asarray(lower_flow_xy, np.float32) / h
+        nf = float(np.linalg.norm(flow))
+        if nf > 1e-6:
+            out[2] = float(np.dot(flow / nf, normal))
+    out[3] = 1.0 if ankles_ok and np.linalg.norm(normal) > 0 else 0.0
+    return out

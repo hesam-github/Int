@@ -1505,8 +1505,18 @@ class PIE(object):
                     if sq_ratio:
                         boxes = [squarify(b, sq_ratio, img_width) for b in boxes]
 
-                    int_prob = [[pid_annots[pid]['attributes']['intention_prob']]] * len(boxes)
-                    int_bin = [[int(pid_annots[pid]['attributes']['intention_prob'] > 0.5)]] * len(boxes)
+                    p_int = float(pid_annots[pid]['attributes']['intention_prob'])
+                    if p_int < (1.0 / 3.0):
+                        cls3 = 0   # no-crossing intention
+                    elif p_int < (2.0 / 3.0):
+                        cls3 = 1   # unsure
+                    else:
+                        cls3 = 2   # crossing intention
+                    one_hot = [0.0, 0.0, 0.0]
+                    one_hot[cls3] = 1.0
+                    int_prob = [[p_int]] * len(boxes)
+                    int_bin = [[int(p_int > 0.5)]] * len(boxes)
+                    int_3 = [one_hot[:] for _ in boxes]
 
                     image_seq.append(images[::seq_stride])
                     box_seq.append(boxes[::seq_stride])
@@ -1529,6 +1539,7 @@ class PIE(object):
                 'occlusion': occ_seq,
                 'intention_prob': intention_prob,
                 'intention_binary': intention_binary,
+                'intention_3class': int_3,
                 'ped_id': pids_seq}
         data.update(behavior_seq or {})
         return data
