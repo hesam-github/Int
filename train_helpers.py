@@ -1342,27 +1342,33 @@ def print_full_epoch_metrics_table(epoch_metrics_path):
 
 
 def print_full_history_table(history_dict):
-    if not history_dict:
+    if not history_dict or "loss" not in history_dict:
         print("[warning] history dict is empty -- nothing to print.")
         return
-    metric_keys = ['loss', 'val_loss'] + [
-        k for k in history_dict.keys()
-        if k not in ('loss', 'val_loss')
-    ]
-    n_epochs_ran = len(history_dict['loss'])
+    n = len(history_dict["loss"])
+    keys = list(history_dict.keys())
+    loss_keys = [k for k in keys if "loss" in k]
+    other_keys = [k for k in keys if k not in loss_keys]
 
-    print("\n" + "=" * 80)
-    print("FULL PER-EPOCH METRICS (from history.pkl -- Keras' own History callback)")
-    print("=" * 80)
-    for e in range(n_epochs_ran):
-        print(f"\nepoch {e + 1:>4}")
-        for k in metric_keys:
-            v = history_dict[k][e]
-            if isinstance(v, (int, float)):
-                print(f"  {k:30} = {v:.4f}")
-            else:
-                print(f"  {k:30} = {v}")
-    print("=" * 80)
+    def dump(title, selected):
+        if not selected:
+            return
+        name_w = max(len(k) for k in selected)
+        print("\n" + title)
+        for start in range(0, n, 8):
+            cols = list(range(start, min(n, start + 8)))
+            print(f"  epochs {cols[0] + 1}-{cols[-1] + 1}")
+            print(" " * name_w + "".join(f"{e + 1:>10d}" for e in cols))
+            for k in selected:
+                line = f"{k:<{name_w}}"
+                for e in cols:
+                    v = history_dict[k][e]
+                    line += f"{float(v):10.4f}" if isinstance(v, (int, float)) else f"{'--':>10}"
+                print(line)
+            print()
+
+    dump("LOSSES (Keras history.pkl). Each row is one head. Columns are epochs.", loss_keys)
+    dump("OTHER history.pkl columns.", other_keys)
 
 # ------------------------------------------------------------------
 # Balance-mode preset resolution
