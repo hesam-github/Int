@@ -342,18 +342,16 @@ def prepare_data(opts, data_opts, pie_path):
         attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}_crit1"),
                           attach_pose_family)
 
-        attach_with_cache('pose', splits, cache_path(f"pose_{pose_scale}_h{pose_h}"),
-                          attach_pose_family)
-
     if 'scene' in offline:
         _require_dir(scene_dir, 'scene')
-        from extra_features import attach_scene, attach_scene_critical
+        from extra_features import attach_scene, attach_scene_critical, attach_light_color
 
         def attach_scene_family(split, verbose):
             attach_scene(split, scene_dir, verbose=verbose)
             attach_scene_critical(split, scene_dir, verbose=verbose)
+            attach_light_color(split, scene_dir, verbose=verbose)
 
-        attach_with_cache('scene', splits, cache_path('scene'), attach_scene_family)
+        attach_with_cache('scene', splits, cache_path('scene_light1'), attach_scene_family)
 
     if 'flow' in offline and opts['balance_mode'] != 'augmentation':
         _require_dir(flow_dir, 'flow')

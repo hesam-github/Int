@@ -230,6 +230,84 @@ def attach_scene_critical(beh_seq, label_dir, key='scene_critical', cache_size=6
         print(f'[scene_critical] frames without label map: {missing}/{total}')
     return beh_seq
 
+LIGHT_COLOR_DIM = 4
+
+
+def traffic_light_color(frame_rgb, label_map, bbox, scale):
+    """4-d traffic-light color from the raw frame, masked by the label map.
+
+    Not a pedestrian-signal detector. Cityscapes class 6 is the housing plus
+    the lamp. Only the brightest 10 percent of those pixels are used, because
+    the housing is dark and would otherwise dominate the mean.
+      0 red fraction
+      1 green fraction
+      2 yellow fraction
+      3 1 if enough bright lamp pixels exist
+    """
+    vec = np.zeros(LIGHT_COLOR_DIM, np.float32)
+    if frame_rgb is None or label_map is None:
+        return vec
+    ys, xs = np.where(label_map == 6)
+    if len(ys) < 20:
+        return vec
+    H, W = frame_rgb.shape[:2]
+    fx = np.clip((xs / scale).astype(np.int32), 0, W - 1)
+    fy = np.clip((ys / scale).astype(np.int32), 0, H - 1)
+    rgb = frame_rgb[fy, fx].astype(np.float32)
+    value = rgb.max(axis=1)
+    keep = value >= np.quantile(value, 0.9)
+    bright = rgb[keep]
+    if len(bright) < 8:
+        return vec
+    r, g, b = bright[:, 0], bright[:, 1], bright[:, 2]
+    red = (r > g + 15) & (r > b + 15) & (r > 40)
+    green = (g > r + 15) & (g > b + 15) & (g > 40)
+    yellow = (r > 40) & (g > 40) & (b + 20 < np.minimum(r, g)) & (np.abs(r - g) < 40)
+    n = float(len(bright))
+    vec[0] = float(red.sum()) / n
+    vec[1] = float(green.sum()) / n
+    vec[2] = float(yellow.sum()) / n
+    vec[3] = 1.0
+    return vec
+
+
+def attach_light_color(beh_seq, label_dir, key='light_color', cache_size=64, verbose=True):
+    """4-d light color per frame; each unique frame is decoded once."""
+    from functools import lru_cache
+    from PIL import Image
+
+    @lru_cache(maxsize=cache_size)
+    def load_label(sid, vid, fr):
+        f = os.path.join(label_dir, sid, vid, f'{fr:05d}.png')
+        return np.asarray(Image.open(f)) if os.path.isfile(f) else None
+
+    @lru_cache(maxsize=8)
+    def load_frame(path):
+        return np.asarray(Image.open(path).convert('RGB'))
+
+    memo, out, missing, total = {}, [], 0, 0
+    for paths in beh_seq['image']:
+        track = []
+        for p in paths:
+            total += 1
+            sid, vid, fr = _parse_frame_path(p)
+            k = (sid, vid, fr)
+            vec = memo.get(k)
+            if vec is None:
+                lm = load_label(sid, vid, fr)
+                if lm is None or not os.path.isfile(p):
+                    vec = [0.0] * LIGHT_COLOR_DIM
+                    missing += 1
+                else:
+                    vec = traffic_light_color(load_frame(p), lm, None, lm.shape[1] / 1920.0).tolist()
+                memo[k] = vec
+            track.append(list(vec))
+        out.append(track)
+    beh_seq[key] = out
+    if verbose:
+        print(f'[light_color] unique frames without label or image: {missing}; frames: {total}')
+    return beh_seq
+
 def attach_scene(beh_seq, label_dir, key='scene', cache_size=64, verbose=True):
     """Adds beh_seq[key]: per track, per frame, a 24-d scene vector from <label_dir>/<set>/<video>/<frame:05d>.png
     (uint8 Cityscapes trainId map, any resolution with the same 16:9 aspect).
