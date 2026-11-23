@@ -345,14 +345,6 @@ def build_intention_model(intent):
         maps = maps_in
 
     vn = getattr(intent, 'visual_norm', None)
-
-    channels = int(maps.shape[-1])
-    if channels != 512:
-        maps = TimeDistributed(
-            Conv2D(512, 1, name="backbone_to_512"),
-            name="backbone_project")(maps)
-        print(f"[visual] 1x1 projection {channels} -> 512 before ConvLSTM. "
-            "Report these parameters; the downstream graph is then the VGG-sized graph.")
     if getattr(intent, 'zero_visual', False):
         vn = None
     cap = getattr(intent, 'capacity', None) or {}
@@ -370,7 +362,13 @@ def build_intention_model(intent):
         from visual_percentile import PositivePercentileScale
         maps = PositivePercentileScale(pscale['scales'], name='visual_percentile')(maps)
         print("[visual_pipeline] applied PositivePercentileScale")
-        
+    channels = maps.shape[-1]
+    if channels is not None and int(channels) != 512:
+        maps = TimeDistributed(
+            Conv2D(512, 1, name="backbone_to_512"),
+            name="backbone_project")(maps)
+        print(f"[visual] 1x1 projection {int(channels)} -> 512 after visual norm, before ConvLSTM")
+
     if cap.get('input_reduce'):
         maps = TimeDistributed(Conv2D(cap['input_reduce'], 1, name='input_reduce_conv'),
                             name='input_reduce')(maps)
@@ -526,34 +524,37 @@ def build_intention_model(intent):
                 names.append(feat_name)
             if len(branches) == 1:
                 hidden = core
-            elif mode == "gated_add":
-                repeated = RepeatVector(intent._decoder_seq_length)(visual)
-                core = LSTM(name="core_decoder", **lstm_kw)(
-                    Concatenate(axis=2, name="core_concat")([repeated, bbox]))
-                parts, names = [], ["core_bbox_visual"]
-                for feat_name, start, end in spans:
-                    if feat_name == "bbox":
-                        continue
-                    parts.append(SliceColumns(start, end, name=f"slice_{feat_name}")(dec_in))
-                    names.append(feat_name)
-                if not parts:
-                    hidden = core
-                    intent.branch_names = names
-                else:
-                    rel_in = parts[0] if len(parts) == 1 else Concatenate(axis=2, name="relation_concat")(parts)
-                    rel_seq = LSTM(name="relation_lstm", return_sequences=True, **extra_kw)(rel_in)
-                    rel = AdditiveTemporalAttention(name="relation_tattn")(rel_seq)
-                    gate = Dense(1, activation="sigmoid", name="rel_gate")(core)
-                    hidden = Add(name="core_plus_rel")([core, Multiply(name="gated_rel")([gate, rel])])
-                    intent.branch_names = ["core_bbox_visual", "relation"]
-                    print("[config] gated_add: one relation LSTM sees the concatenated extras. "
-                        "Softmax does not drop them. Aux heads, if on, are only core and relation.")
             else:
                 hidden, attn_weights = BranchAttnPool(
                     len(branches), return_weights=True, name='branch_attention')(branches)
             intent.branch_names = names
 
-
+        elif mode == 'gated_add':
+            repeated = RepeatVector(intent._decoder_seq_length)(visual)
+            core = LSTM(name='core_decoder', **lstm_kw)(
+                Concatenate(axis=2, name='core_concat')([repeated, bbox]))
+            parts = []
+            for feat_name, start, end in spans:
+                if feat_name == 'bbox':
+                    continue
+                parts.append(SliceColumns(start, end, name=f'slice_{feat_name}')(dec_in))
+            if not parts:
+                hidden = core
+                branches = [core]
+                intent.branch_names = ['core_bbox_visual']
+            else:
+                rel_in = parts[0] if len(parts) == 1 else Concatenate(
+                    axis=2, name='relation_concat')(parts)
+                rel_seq = LSTM(name='relation_lstm', return_sequences=True, **extra_kw)(rel_in)
+                rel = AdditiveTemporalAttention(name='relation_tattn')(rel_seq)
+                gate = Dense(1, activation='sigmoid', name='rel_gate')(core)
+                hidden = Add(name='core_plus_rel')([
+                    core,
+                    Multiply(name='gated_rel')([gate, rel]),
+                ])
+                branches = [core, rel]
+                intent.branch_names = ['core_bbox_visual', 'relation']
+                print('[config] gated_add: one relation LSTM, core + sigmoid(core) * relation')
 
         else:
             raise ValueError(f'unknown branch_mode: {mode!r}')

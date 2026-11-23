@@ -258,7 +258,34 @@ class PIEIntent(object):
         self._decoder_dense_output_size = config['decoder_dense_output_size']
         self._decoder_seq_length = config['decoder_seq_length']
 
+    def _ensure_context_model(self):
+        """Frozen extractor. Default vgg16. Native map is cached; 1x1 to 512 is in the graph."""
+        name = getattr(self, 'backbone_name', None) or 'vgg16'
+        if getattr(self, '_backbone_ready', None) == name and getattr(self, 'context_model', None) is not None:
+            return self.context_model
+        from visual_backbones import build_extractor
+        encode, preprocess, token, channels = build_extractor(name)
+        self._encode_batch = encode
+        self._preprocess_frame = preprocess
+        self._backbone_token = token
+        self._backbone_channels = int(channels)
 
+        class _Extractor:
+            def __init__(self, fn, ch):
+                self._fn = fn
+                self.output_shape = (None, 7, 7, int(ch))
+
+            def predict_on_batch(self, batch):
+                return self._fn(batch)
+
+        self.context_model = _Extractor(encode, channels)
+        self._backbone_ready = name
+        print(f"[backbone] extractor={token} cached map=(7, 7, {int(channels)})")
+        return self.context_model
+
+    def _feature_cache_name(self):
+        token = getattr(self, '_backbone_token', None) or getattr(self, 'backbone_name', None) or 'vgg16'
+        return f"{token}_none_{PREP_TAG}"
     def load_images_and_process(self,
                                     img_sequences,
                                     bbox_sequences,
@@ -383,7 +410,7 @@ class PIEIntent(object):
 
                     img_data = img_pad(cropped_image, mode='pad_resize', size=224)
                     image_array = img_to_array(img_data)
-                    preprocessed_img = vgg16.preprocess_input(image_array)
+                    preprocessed_img = self._preprocess_frame(image_array)
                     preprocessed_batch.append(preprocessed_img)
                     batch_meta.append((i, j, img_save_path))
 
@@ -481,9 +508,7 @@ class PIEIntent(object):
               f"from {data_type['decoder_input_type']}")
 
         if getattr(self, 'use_visual', True):
-            self.context_model = vgg16.VGG16(input_shape=(224, 224, 3),
-                                             include_top=False,
-                                             weights='imagenet')
+            self._ensure_context_model()
 
         return {'images': images,
                 'bboxes': bboxes,
@@ -514,9 +539,7 @@ class PIEIntent(object):
             decoder_input = apply_feature_norms(self, decoder_input, self.feature_spans, fit=False)
 
         if not hasattr(self, 'context_model') or self.context_model is None:
-            self.context_model = vgg16.VGG16(input_shape=(224, 224, 3),
-                                            include_top=False,
-                                            weights='imagenet')
+            self._ensure_context_model()
 
         test_img = self.load_images_and_process(images,
                                                 bboxes,
@@ -607,7 +630,7 @@ class PIEIntent(object):
             f"squarify={self.crop_squarify_ratio}",
             "enlarge=2",
             "pad_resize",
-            "vgg16",
+            self._backbone_token,
             f"n={n}",
             f"seq_len={seq_len}",
             f"shape={feat_shape}",
@@ -752,9 +775,7 @@ class PIEIntent(object):
 
             test_dataset = None
             if getattr(self, 'use_visual', True):
-                self.context_model = vgg16.VGG16(input_shape=(224, 224, 3),
-                                                 include_top=False,
-                                                 weights='imagenet')
+                self._ensure_context_model()
                 feature_shape = self.context_model.output_shape[1:]
                 print(f"feature_shape from context_model: {feature_shape}")
 
@@ -1009,6 +1030,7 @@ class PIEIntent(object):
                     head_auc = self._head_aucs() if len(self._all_outputs) > 1 else {}
                     logs['val_nll'] = val_m['nll']
                     logs['val_auc'] = val_m['roc_auc'] if not np.isnan(val_m['roc_auc']) else 0.0
+
                     def _fmt_loss_parts(logs, prefix=""):
                         parts = []
                         total = logs.get(f"{prefix}loss")
@@ -1025,6 +1047,36 @@ class PIEIntent(object):
 
                     train_parts = _fmt_loss_parts(logs)
                     val_parts = _fmt_loss_parts(logs, prefix="val_")
+
+                    run_full_train = self._should_run_full_train_eval(epoch)
+
+                    train_m = None
+                    if run_full_train:
+                        train_prob = self._predict_main(self.train_eval_dataset)
+                        train_m = compute_full_metrics(self.train_y_true, train_prob)
+                        train_m['pred_mean'] = float(train_prob.mean())
+                        train_m['pred_std'] = float(train_prob.std())
+
+                    test_m = None
+                    test_loss = None
+                    test_parts = None
+                    if self.test_dataset is not None and run_full_train:
+                        test_prob = self._predict_main(self.test_dataset)
+                        test_m = compute_full_metrics(self.test_y_true, test_prob)
+                        test_m['pred_mean'] = float(test_prob.mean())
+                        test_m['pred_std'] = float(test_prob.std())
+                        test_eval = self.model.evaluate(self.test_dataset, verbose=0)
+                        if isinstance(test_eval, (list, tuple)):
+                            named = dict(zip(self.model.metrics_names, test_eval))
+                        else:
+                            named = {'loss': float(test_eval)}
+                        test_parts = _fmt_loss_parts(named)
+                        test_loss = None if named.get('loss') is None else float(named['loss'])
+
+                    suffix = ""
+                    if not run_full_train:
+                        suffix = ("  (train/test full metrics off)" if self.eval_every is None
+                                else "  (train/test full metrics skipped this epoch)")
 
                     def _print_kv_block(title, text):
                         print(f"  {title}")
@@ -1057,7 +1109,7 @@ class PIEIntent(object):
                         for name, val in rows:
                             print(f"    {name:<14}  {val:8.4f}")
 
-                    def _print_epoch_report(self, epoch, train_parts, val_parts, test_parts,
+                    def _print_epoch_report(epoch, train_parts, val_parts, test_parts,
                                             suffix, train_m, val_m, test_m, head_auc):
                         print(f"\nepoch {epoch + 1}")
                         _print_kv_block("train loss", train_parts)
@@ -1078,8 +1130,7 @@ class PIEIntent(object):
                         if test_m is not None:
                             _print_metric_block("test metrics", test_m)
 
-                    # فراخوانی (جایگزین print قبلی):
-                    self._print_epoch_report(
+                    _print_epoch_report(
                         epoch, train_parts, val_parts, test_parts, suffix,
                         train_m, val_m, test_m, head_auc)
 
@@ -1109,7 +1160,6 @@ class PIEIntent(object):
                     if test_m is not None:
                         del test_prob, test_m
                     gc.collect()
-
                 def _print_row(self, epoch, split_name, m):
                     print(f"epoch {epoch+1:>3} [{split_name:5}] "
                         f"accuracy={m['accuracy']:.4f} "
@@ -1233,9 +1283,7 @@ class PIEIntent(object):
         self.temporal_hp = saved_hp.get('temporal_hp') or {}
         self.load_model_config(configs[0])
         if getattr(self, 'use_visual', True):
-            self.context_model = vgg16.VGG16(input_shape=(224, 224, 3),
-                                             include_top=False,
-                                             weights='imagenet')
+            self._ensure_context_model()
         try:
             test_model = load_model(os.path.join(model_path, 'model.h5'),
                                     compile=False, custom_objects=custom_objects)
@@ -1285,7 +1333,7 @@ class PIEIntent(object):
                                         data_type='features_context_pad_resize',
                                         model_name=FEATURE_CACHE_NAME,
                                         data_subset=data_subset)
-            drive_feat_dir = os.path.join(checkpoint_dir, 'vgg16_feature_cache')
+            drive_feat_dir = os.path.join(checkpoint_dir, f"{self._backbone_token}_feature_cache")
             if os.path.exists(drive_feat_dir):
                 os.system(f'cp -rn "{drive_feat_dir}"/* "{local_feat_dir}"/ 2>/dev/null')
 

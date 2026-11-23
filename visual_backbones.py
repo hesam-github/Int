@@ -1,16 +1,16 @@
-"""visual_backbones.py -- frozen extractors. Cached map is always (7, 7, C)."""
+"""Frozen image extractors. Cached map is always (7, 7, C), C native."""
 import numpy as np
 
-def preprocess_imagenet_torch(image_bgr_or_rgb):
-    """image_array from img_to_array is RGB, 0..255. ViT uses mean/std, not VGG caffe."""
-    x = image_bgr_or_rgb.astype(np.float32) / 255.0
+def preprocess_imagenet_torch(image_rgb):
+    """img_to_array is RGB in 0..255. ViT uses mean/std, not VGG caffe."""
+    x = np.asarray(image_rgb, dtype=np.float32) / 255.0
     mean = np.array([0.485, 0.456, 0.406], np.float32)
     std = np.array([0.229, 0.224, 0.225], np.float32)
     return (x - mean) / std
 
 def build_extractor(name):
-    """Returns (callable, preprocess, cache_token, channels_before_1x1)."""
-    name = name.lower()
+    """Returns (predict_on_batch, preprocess, cache_token, channels)."""
+    name = str(name).lower()
     if name == "vgg16":
         from keras.applications import vgg16
         model = vgg16.VGG16(input_shape=(224, 224, 3), include_top=False, weights="imagenet")
@@ -24,6 +24,7 @@ def build_extractor(name):
         from torchvision.models import vit_b_16, ViT_B_16_Weights
         net = vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)
         net.eval()
+
         def encode(batch):
             t = torch.from_numpy(np.transpose(batch, (0, 3, 1, 2))).float()
             with torch.no_grad():
@@ -35,6 +36,7 @@ def build_extractor(name):
                 h = int(n ** 0.5)
                 x = x.reshape(b, h, h, c).permute(0, 3, 1, 2)
                 x = torch.nn.functional.adaptive_avg_pool2d(x, (7, 7))
-            return x.permute(0, 2, 3, 1).cpu().numpy()
+            return np.asarray(x.permute(0, 2, 3, 1).cpu().numpy(), dtype=np.float32)
+
         return encode, preprocess_imagenet_torch, "vit_b16", 768
     raise ValueError("backbone must be vgg16, resnet50, or vit_b16")
