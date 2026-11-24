@@ -1078,19 +1078,16 @@ class PIEIntent(object):
                         suffix = ("  (train/test full metrics off)" if self.eval_every is None
                                 else "  (train/test full metrics skipped this epoch)")
 
-                    def _print_kv_block(title, text):
+                    def _print_loss_line(title, text):
                         print(f"  {title}")
                         if not text or text == "n/a":
                             print("    (none)")
                             return
                         items = [p.strip() for p in text.split("|")]
-                        width = max(len(p.split("=", 1)[0].strip()) for p in items)
-                        for p in items:
-                            key, val = p.split("=", 1)
-                            print(f"    {key.strip():<{width}}  {val.strip()}")
+                        print("    " + "  |  ".join(items))
 
-                    def _print_metric_block(title, m):
-                        rows = [
+                    def _print_metric_lines(title, m):
+                        row1 = [
                             ("accuracy", m["accuracy"]),
                             ("majority_acc", m["majority_acc"]),
                             ("precision", m["precision"]),
@@ -1098,6 +1095,8 @@ class PIEIntent(object):
                             ("specificity", m["specificity"]),
                             ("balanced_acc", m["balanced_acc"]),
                             ("f1", m["f1"]),
+                        ]
+                        row2 = [
                             ("auc", m["roc_auc"]),
                             ("ap", m["pr_auc"]),
                             ("nll", m["nll"]),
@@ -1106,29 +1105,31 @@ class PIEIntent(object):
                             ("pstd", m["pred_std"]),
                         ]
                         print(f"  {title}")
-                        for name, val in rows:
-                            print(f"    {name:<14}  {val:8.4f}")
+                        print("    " + "  |  ".join(f"{n:<14} {v:8.4f}" for n, v in row1))
+                        print("    " + "  |  ".join(f"{n:<6} {v:8.4f}" for n, v in row2))
 
                     def _print_epoch_report(epoch, train_parts, val_parts, test_parts,
                                             suffix, train_m, val_m, test_m, head_auc):
                         print(f"\nepoch {epoch + 1}")
-                        _print_kv_block("train loss", train_parts)
-                        _print_kv_block("val loss", val_parts)
+                        _print_loss_line("train loss", train_parts)
+                        _print_loss_line("val loss", val_parts)
                         if test_parts is not None:
-                            _print_kv_block("test loss", test_parts)
+                            _print_loss_line("test loss", test_parts)
                         if suffix:
                             print(suffix.strip())
                         print()
                         if train_m is not None:
-                            _print_metric_block("train metrics", train_m)
-                        _print_metric_block("val metrics", val_m)
+                            _print_metric_lines("train metrics", train_m)
+                            print()
+                        _print_metric_lines("val metrics", val_m)
                         if head_auc:
+                            print()
                             print("  val branch AUC")
-                            width = max(len(k) for k in head_auc)
-                            for k, v in head_auc.items():
-                                print(f"    {k:<{width}}  {v:8.4f}")
+                            parts = [f"{k:<22} {v:8.4f}" for k, v in head_auc.items()]
+                            print("    " + "  |  ".join(parts))
                         if test_m is not None:
-                            _print_metric_block("test metrics", test_m)
+                            print()
+                            _print_metric_lines("test metrics", test_m)
 
                     _print_epoch_report(
                         epoch, train_parts, val_parts, test_parts, suffix,
@@ -1226,6 +1227,19 @@ class PIEIntent(object):
             if not os.path.exists(model_path):
                 raise RuntimeError("No checkpoint was written (stopped before epoch 1 finished).")
             history_dict = hist_cb.history
+            mon = train_config['learning_scheduler_params']['monitor_value']
+            mode = monitor_mode
+            if mon in history_dict and history_dict[mon]:
+                vals = history_dict[mon]
+                if mode == 'max':
+                    best_idx = int(np.argmax(vals))
+                else:
+                    best_idx = int(np.argmin(vals))
+                best_ep = best_idx + 1
+                best_val = float(vals[best_idx])
+                print(f"\n[best] epoch {best_ep}  {mon}={best_val:.4f}  (mode={mode})")
+            else:
+                print(f"\n[best] monitored metric '{mon}' not found in history")
 
             history_path, saved_files_path = self.get_path(type_save='models',
                                                         model_name='convlstm_encdec',
