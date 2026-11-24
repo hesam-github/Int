@@ -77,12 +77,11 @@ def interactive_pick_branch_mode(default='static_pool'):
     """Sub-menu for branchattn and branchattn_temporal. Does not change other architectures."""
     modes = ['static_pool', 'temporal_concat', 'core_plus_extras', 'gated_add']
     print('\n--- Branch fusion ---')
-    print(' 1. static_pool       Dense(visual) + one LSTM per column + softmax [aux + attn log]')
-    print(' 2. temporal_concat   PIE graph, ONE LSTM, no branches [NO aux, NO attn log]')
-    print(' 3. core_plus_extras  core LSTM on visual+bbox; one LSTM per extra; softmax [aux + attn log]')
-    print(' 4. gated_add         same core; ALL extras concatenated into ONE relation LSTM;')
-    print('                      hidden = core + sigmoid(core) * relation. No softmax.')
-    print(f'    default is {default}')
+    print(' 1. static_pool       Dense(visual) + one LSTM per column + softmax')
+    print(' 2. temporal_concat   one LSTM, no branches')
+    print(' 3. core_plus_extras  core LSTM + one LSTM per extra + softmax')
+    print(' 4. gated_add         core always kept; all extras -> one LSTM;')
+    print('                      hidden = core + sigmoid(core) * relation')
     raw = input('Select [1-4] (default 1): ').strip()
     if not raw:
         return default

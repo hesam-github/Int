@@ -1125,8 +1125,8 @@ class PIEIntent(object):
                         if head_auc:
                             print()
                             print("  val branch AUC")
-                            parts = [f"{k:<22} {v:8.4f}" for k, v in head_auc.items()]
-                            print("" + "| ".join(parts))
+                            parts = [f"{k}: {v:.4f}" for k, v in head_auc.items()]
+                            print("  " + " | ".join(parts))
                         if test_m is not None:
                             print()
                             _print_metric_lines("test metrics", test_m)
