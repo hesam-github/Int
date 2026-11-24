@@ -112,6 +112,11 @@ def pick_run_options(hp):
 
     opts['use_visual'] = interactive_pick_use_visual()
     print(f"[config] USE_VISUAL = {opts['use_visual']}")
+    if opts['use_visual']:
+        opts['backbone'] = interactive_pick_backbone()
+    else:
+        opts['backbone'] = None
+    print(f"[config] BACKBONE = {opts['backbone']}")
 
     from architecture_registry import (
         interactive_pick_architecture, get_architecture_config,
@@ -492,7 +497,8 @@ def choose_run_identity(opts, data, hp, pie_path):
 
     opts['aux_loss_weight'] = 0.0
     aux_applies = (arch_name in ('branchattn', 'branchattn_temporal', 'pcpa')
-                   and opts.get('branch_mode') in ('static_pool', 'core_plus_extras', None))
+                   and opts.get('branch_mode') in (
+                       'static_pool', 'core_plus_extras', 'gated_add', None))
     if aux_applies:
         opts['aux_loss_weight'] = interactive_pick_aux_loss()
     else:
@@ -568,6 +574,10 @@ def choose_run_identity(opts, data, hp, pie_path):
     if opts.get('visual_norm'):
         log_first = bool((opts.get('capacity') or {}).get('log1p'))
         short_tag = ('VNormLog_' if log_first else 'VNorm_') + short_tag
+    if opts.get('branch_mode'):
+        short_tag = opts['branch_mode'] + '_' + short_tag
+    if opts.get('backbone') and opts['backbone'] != 'vgg16':
+        short_tag = opts['backbone'] + '_' + short_tag
 
     architecture = arch_name
     run_name = interactive_pick_new_run_name(
@@ -726,8 +736,7 @@ def start_run(opts, hp, data, ident, pie_path):
     model.feature_norm = opts.get('feature_norm') or {}
     model.zero_decoder_bbox = opts.get('zero_decoder_bbox', False)
     model.use_visual = opts.get('use_visual', True)
-    model.use_visual = opts.get('use_visual', True)
-    model.backbone_name = hp.get('backbone', 'vgg16')
+    model.backbone_name = opts.get('backbone') or 'vgg16'
     model.extra_input_dropout = 0.0
     model.capacity = opts.get('capacity')
     cap = opts.get('capacity') or {}

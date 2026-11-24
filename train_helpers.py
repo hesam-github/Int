@@ -2334,9 +2334,9 @@ def interactive_pick_feature_norms(decoder_features, global_default='none', feat
 
     
 def interactive_pick_use_visual():
-    print("\n[use_visual] does the model need the VGG16 image context?", flush=True)
-    print("  [n] no  -- VGG16 is NOT loaded. Decoder only (bbox, velocity, annotations, offline pose/scene/flow).", flush=True)
-    print("  [y] yes -- VGG16 context feeds the ConvLSTM encoder. Slow: extracts features for every frame.  <-- default", flush=True)
+    print("\n[use_visual] does the model need image context?", flush=True)
+    print("  [n] no  -- no extractor. Decoder only (bbox, velocity, annotations, offline pose/scene/flow).", flush=True)
+    print("  [y] yes -- a frozen extractor feeds the ConvLSTM. The next question picks which one.  <-- default", flush=True)
     while True:
         raw = input("[use_visual] y/n [default: y]: ").strip().lower()
         if raw in ('', 'y', 'yes'):
@@ -2344,6 +2344,26 @@ def interactive_pick_use_visual():
         if raw in ('n', 'no'):
             return False
         print("  ! enter y or n.", flush=True)
+
+
+def interactive_pick_backbone(default='vgg16'):
+    """Asked only when use_visual is True. ConvLSTM still sees 7x7x512 after a 1x1 if needed."""
+    options = [
+        ('vgg16', 'cached map (7, 7, 512). Same cache as previous runs.'),
+        ('resnet50', 'cached map (7, 7, 2048), then a trainable 1x1 to 512. New cache.'),
+        ('vit_b16', 'ViT-B/16 tokens pooled to (7, 7, 768), then a trainable 1x1 to 512. Needs torch and torchvision.'),
+    ]
+    print("\n[backbone] frozen extractor:", flush=True)
+    for i, (name, text) in enumerate(options):
+        mark = "  <-- default" if name == default else ""
+        print(f"  [{i}] {name}: {text}{mark}", flush=True)
+    while True:
+        raw = input("[backbone] 0/1/2 [default 0]: ").strip()
+        if raw == '':
+            return default
+        if raw in ('0', '1', '2'):
+            return options[int(raw)][0]
+        print("  ! enter 0, 1 or 2.", flush=True)
 
 def print_feature_diagnostics(beh_seq):
     """Print numeric health of every feature; class gap uses one label per track."""
