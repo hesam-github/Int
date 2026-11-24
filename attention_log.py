@@ -31,8 +31,8 @@ class AttentionLogger(tf.keras.callbacks.Callback):
         print(f"epoch {epoch + 1}  attention")
         parts = [f"{n:<18} mean={mean[i]:7.3f}  top1={top[i]:6.3f}"
                  for i, n in enumerate(names)]
-        parts.append(f"entropy {entropy:7.3f}   (1=uniform, 0=one branch)")
-        print("  " + "  |  ".join(parts))
+        parts.append(f"entropy {entropy:7.3f}  (1=uniform, 0=one branch)")
+        print("" + " | ".join(parts))
         tmp = self.save_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fid:
             json.dump(self.records, fid, indent=2)

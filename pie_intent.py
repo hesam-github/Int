@@ -1081,10 +1081,10 @@ class PIEIntent(object):
                     def _print_loss_line(title, text):
                         print(f"  {title}")
                         if not text or text == "n/a":
-                            print("    (none)")
+                            print(" (none)")
                             return
                         items = [p.strip() for p in text.split("|")]
-                        print("    " + "  |  ".join(items))
+                        print("" + "| ".join(items))
 
                     def _print_metric_lines(title, m):
                         row1 = [
@@ -1105,8 +1105,8 @@ class PIEIntent(object):
                             ("pstd", m["pred_std"]),
                         ]
                         print(f"  {title}")
-                        print("    " + "  |  ".join(f"{n:<14} {v:8.4f}" for n, v in row1))
-                        print("    " + "  |  ".join(f"{n:<6} {v:8.4f}" for n, v in row2))
+                        print("" + "| ".join(f"{n:<14} {v:8.4f}" for n, v in row1))
+                        print("" + "| ".join(f"{n:<6} {v:8.4f}" for n, v in row2))
 
                     def _print_epoch_report(epoch, train_parts, val_parts, test_parts,
                                             suffix, train_m, val_m, test_m, head_auc):
@@ -1126,7 +1126,7 @@ class PIEIntent(object):
                             print()
                             print("  val branch AUC")
                             parts = [f"{k:<22} {v:8.4f}" for k, v in head_auc.items()]
-                            print("    " + "  |  ".join(parts))
+                            print("" + "| ".join(parts))
                         if test_m is not None:
                             print()
                             _print_metric_lines("test metrics", test_m)
