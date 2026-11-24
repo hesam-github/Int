@@ -51,6 +51,8 @@ from train_helpers import (
     find_best_threshold_by_f1,
     interactive_pick_pose_min_height,
     interactive_pick_use_visual,
+    interactive_pick_use_visual,
+    interactive_pick_backbone,
     interactive_pick_offline_features,
     interactive_pick_balance_mode,
     interactive_pick_clip_mode,
