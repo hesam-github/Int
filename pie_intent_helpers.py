@@ -184,8 +184,8 @@ def _windowed_frame_generator(model, images, bboxes, ped_ids, decoder_input,
         batch_decoder = np.asarray(decoder_input[idx], dtype=np.float32)
         batch_output = np.asarray(output[idx], dtype=np.float32)
 
-        assert batch_output.ndim == 2 and batch_output.shape[1] == 1, (
-            f"Expected batch_output shape (batch, 1), got {batch_output.shape}.")
+        assert batch_output.ndim == 2 and batch_output.shape[1] in (1, 3), (
+            f"Expected batch_output shape (batch, 1) or (batch, 3), got {batch_output.shape}.")
 
         yield batch_features.astype(np.float32, copy=False), batch_decoder, batch_output
 
@@ -212,7 +212,7 @@ def build_generator_dataset(model, images, bboxes, ped_ids, decoder_input,
             tf.TensorSpec(shape=(None, seq_length) + feature_shape, dtype=tf.float32),
             tf.TensorSpec(shape=(None, decoder_input.shape[1], decoder_input.shape[2]), dtype=tf.float32),
         ),
-        tf.TensorSpec(shape=(None, 1), dtype=tf.float32),
+        tf.TensorSpec(shape=(None, int(np.shape(output)[-1])), dtype=tf.float32),
     )
 
     ds = tf.data.Dataset.from_generator(gen, output_signature=output_signature)

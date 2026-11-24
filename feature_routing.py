@@ -533,29 +533,42 @@ def build_intention_model(intent):
             repeated = RepeatVector(intent._decoder_seq_length)(visual)
             core = LSTM(name='core_decoder', **lstm_kw)(
                 Concatenate(axis=2, name='core_concat')([repeated, bbox]))
-            parts = []
+            branches = [core]
+            names = ['core_bbox_visual']
+            residual = core
+            gates = []
+            gate_names = []
             for feat_name, start, end in spans:
                 if feat_name == 'bbox':
                     continue
-                parts.append(SliceColumns(start, end, name=f'slice_{feat_name}')(dec_in))
-            if not parts:
-                hidden = core
-                branches = [core]
-                intent.branch_names = ['core_bbox_visual']
-            else:
-                rel_in = parts[0] if len(parts) == 1 else Concatenate(
-                    axis=2, name='relation_concat')(parts)
-                rel_seq = LSTM(name='relation_lstm', return_sequences=True, **extra_kw)(rel_in)
-                rel = AdditiveTemporalAttention(name='relation_tattn')(rel_seq)
-                gate = Dense(1, activation='sigmoid', name='rel_gate')(core)
-                hidden = Add(name='core_plus_rel')([
-                    core,
-                    Multiply(name='gated_rel')([gate, rel]),
+                part = SliceColumns(start, end, name=f'slice_{feat_name}')(dec_in)
+                rel = make_sequence_branch(
+                    branch_kind, feat_name, part, units, extra_kw, hp=branch_hp,
+                    dropout=extra_do, l2_value=intent.reg_value, attention=attn)
+                gate = Dense(1, activation='sigmoid', name=f'gate_{feat_name}')(
+                    Concatenate(name=f'gate_in_{feat_name}')([core, rel]))
+                residual = Add(name=f'add_{feat_name}')([
+                    residual,
+                    Multiply(name=f'gated_{feat_name}')([gate, rel]),
                 ])
-                branches = [core, rel]
-                intent.branch_names = ['core_bbox_visual', 'relation']
-                print('[config] gated_add: one relation LSTM, core + sigmoid(core) * relation')
-
+                branches.append(rel)
+                names.append(feat_name)
+                gates.append(gate)
+                gate_names.append(feat_name)
+            hidden = residual
+            intent.branch_names = names
+            intent.gate_names = gate_names
+            if gates:
+                attn_weights = Concatenate(axis=1, name='gate_stack')(gates)
+                print(f'[config] gated_add: core always kept; {len(gates)} independent residual gates')
+                print(f'[config] gated_add: branch_kind={branch_kind} temporal_attention={attn}')
+                print('[warning] gates are independent sigmoids, not a softmax. '
+                      'A gate near 0 drops only its own residual. The core stays.')
+                if not attn and branch_kind == 'lstm':
+                    print('[warning] additive temporal attention is off '
+                          '(architecture is not branchattn_temporal). Each residual uses the last step.')
+            else:
+                print('[config] gated_add: no extra features selected; core only')
         else:
             raise ValueError(f'unknown branch_mode: {mode!r}')
 
@@ -571,7 +584,7 @@ def build_intention_model(intent):
         for i, branch in enumerate(branches):
             aux = Dense(
                 intent._decoder_dense_output_size,
-                activation='sigmoid',
+                activation=getattr(intent, '_head_activation', 'sigmoid'),
                 kernel_regularizer=intent._kernel_regularizer,
                 bias_regularizer=intent._bias_regularizer,
                 name=f'aux_head_{i}'
@@ -613,7 +626,7 @@ def build_intention_model(intent):
         for name, branch in zip(intent.branch_names, branches):
             heads.append(Dense(
                 intent._decoder_dense_output_size,
-                activation='sigmoid',
+                activation=getattr(intent, '_head_activation', 'sigmoid'),
                 kernel_regularizer=intent._kernel_regularizer,
                 bias_regularizer=intent._bias_regularizer,
                 name=f'aux_{name}')(branch))

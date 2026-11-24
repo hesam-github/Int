@@ -80,8 +80,8 @@ def interactive_pick_branch_mode(default='static_pool'):
     print(' 1. static_pool       Dense(visual) + one LSTM per column + softmax')
     print(' 2. temporal_concat   one LSTM, no branches')
     print(' 3. core_plus_extras  core LSTM + one LSTM per extra + softmax')
-    print(' 4. gated_add         core always kept; all extras -> one LSTM;')
-    print('                      hidden = core + sigmoid(core) * relation')
+    print(' 4. gated_add         core always kept; one residual encoder per extra;')
+    print('                      gate sees core and that feature; independent sigmoid')
     raw = input('Select [1-4] (default 1): ').strip()
     if not raw:
         return default

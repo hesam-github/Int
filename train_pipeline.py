@@ -193,9 +193,25 @@ def pick_run_options(hp):
     opts['monitor_metric'], opts['monitor_mode'] = interactive_pick_monitor_metric()
     print(f"[config] MONITOR_METRIC = {opts['monitor_metric']} (mode={opts['monitor_mode']})")
 
-    opts['loss_name'], opts['loss_fn'] = interactive_pick_loss_choice(
-        balance_mode=opts['balance_mode'])
-    print(f"[config] LOSS_FUNCTION (family) = {opts['loss_name']}")
+    print('\n--- label task ---')
+    print('  [0] binary   intention_prob > 0.5                         <-- default')
+    print('  [1] 3-class  same human probability, three equal bins')
+    print('      0 if p<1/3 (no cross), 1 if p<2/3 (unsure), 2 otherwise (cross).')
+    print('      This is only the binning used by Diving Deeper.')
+    print('      It is not their sample length, overlap, or reported table.')
+    print('      Loss is categorical_crossentropy. The binary loss menu is not asked.')
+    task_raw = input('Select [0/1] (default 0): ').strip()
+    opts['task'] = '3class' if task_raw == '1' else 'binary'
+    print(f"[config] TASK = {opts['task']}")
+    if opts['task'] == '3class':
+        opts['loss_name'] = 'categorical_crossentropy'
+        opts['loss_fn'] = 'categorical_crossentropy'
+        print('[config] LOSS_FUNCTION (family) = categorical_crossentropy')
+        print('[warning] val_auc for this task is macro one-vs-rest, not binary ROC-AUC.')
+    else:
+        opts['loss_name'], opts['loss_fn'] = interactive_pick_loss_choice(
+            balance_mode=opts['balance_mode'])
+        print(f"[config] LOSS_FUNCTION (family) = {opts['loss_name']}")
 
     if opts['balance_mode'] == 'undersample_base_article':
         clip_type, clip_amount = 'clipvalue', hp['clipvalue']
@@ -308,6 +324,12 @@ def prepare_data(opts, data_opts, pie_path):
     data_opts = copy.deepcopy(data_opts)
     data_opts['data_split_type'] = opts['split_type']
     data_opts.update(opts['split_opts'])
+    if opts.get('task') == '3class':
+        data_opts['output_type'] = ['intention_3class']
+        print('[task] output_type = intention_3class')
+    else:
+        data_opts['output_type'] = ['intention_binary']
+        print('[task] output_type = intention_binary (intention_prob > 0.5)')
 
     offline = set(opts.get('offline', []))     # subset of {'pose', 'scene', 'flow'}
     pose_dir = os.path.join(pie_path, 'extra', 'pose')
@@ -407,6 +429,24 @@ def prepare_data(opts, data_opts, pie_path):
     if opts.get('use_tte'):
         for split in (train, val, test):
             attach_tte(split, verbose=(split is train))
+    if opts.get('task') == '3class':
+        def _write_three(split):
+            built = []
+            for track in split['intention_prob']:
+                rows = []
+                for frame in track:
+                    p = float(np.asarray(frame).ravel()[0])
+                    if p < (1.0 / 3.0):
+                        rows.append([1.0, 0.0, 0.0])
+                    elif p < (2.0 / 3.0):
+                        rows.append([0.0, 1.0, 0.0])
+                    else:
+                        rows.append([0.0, 0.0, 1.0])
+                built.append(rows)
+            split['intention_3class'] = built
+        for split in (train, val, test):
+            _write_three(split)
+        print('[task] intention_3class written from intention_prob on train/val/test')
 
     if 'flow' not in offline:
         print("[flow] not selected: nothing loaded")
@@ -829,6 +869,14 @@ def evaluate_run(model, data, saved, paths, history, hp):
     """Overlap 1 on train/val/test, then a val-only threshold (re-thresholding only, no re-inference)."""
     from plot_metrics import plot_training_metrics
     d_opts = data['data_opts']
+
+    if 'intention_3class' in (d_opts.get('output_type') or []):
+        print('[eval] 3-class run: binary threshold, calibration and prior-correction tables are not computed.')
+        print('[eval] Per-epoch lines are the numbers for this run.')
+        print('[eval] They are not the Diving Deeper table. Observation length, overlap and the metric definition differ.')
+        return dict(metrics=None, metrics_calibrated=None, threshold=None,
+                    metrics_prior_corrected=None, metrics_custom=None)
+                    
     splits = (('train', data['train']), ('val', data['val']), ('test', data['test']))
 
     print_phase(PHASE_FULL_EVAL)

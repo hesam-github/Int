@@ -1105,8 +1105,8 @@ class PIEIntent(object):
                             ("pstd", m["pred_std"]),
                         ]
                         print(f"  {title}")
-                        print("" + "| ".join(f"{n:<14} {v:8.4f}" for n, v in row1))
-                        print("" + "| ".join(f"{n:<6} {v:8.4f}" for n, v in row2))
+                        print(" | ".join(f"{n}={v:.4f}" for n, v in row1))
+                        print(" | ".join(f"{n}={v:.4f}" for n, v in row2))
 
                     def _print_epoch_report(epoch, train_parts, val_parts, test_parts,
                                             suffix, train_m, val_m, test_m, head_auc):
@@ -1125,7 +1125,7 @@ class PIEIntent(object):
                         if head_auc:
                             print()
                             print("  val branch AUC")
-                            parts = [f"{k}: {v:.4f}" for k, v in head_auc.items()]
+                            parts = [f"{k}={v:.4f}" for k, v in head_auc.items()]
                             print("  " + " | ".join(parts))
                         if test_m is not None:
                             print()

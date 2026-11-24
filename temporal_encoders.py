@@ -1055,11 +1055,23 @@ def _ask_yes_no(prompt, default=False):
 
 
 def choose_branch_temporal_for_menu(opts, batch_size=None):
-    """branchattn / branchattn_temporal only. Enter at every question keeps the original graph."""
-    vis, vis_hp, kind, kind_hp = None, {}, 'lstm', {}
+    """Asked only for branchattn_temporal. branchattn locks ConvLSTM2D + LSTM."""
+    if opts.get('architecture') != 'branchattn_temporal':
+        opts['branch_visual_encoder'] = 'convlstm2d'
+        opts['branch_visual_hp'] = {}
+        opts['branch_temporal_kind'] = 'lstm'
+        opts['branch_temporal_hp'] = {}
+        opts['branch_tag'] = None
+        print('[config] BRANCH_VISUAL_ENCODER = convlstm2d')
+        print('[config] BRANCH_TEMPORAL_KIND  = lstm')
+        print('[warning] temporal-encoder questions are not asked for this architecture. '
+              'branchattn has no additive temporal attention. Asking them would describe a graph that is not built.')
+        return opts
 
-    print('\n--- branchattn: temporal block of the VISUAL encoder ---')
+    vis, vis_hp, kind, kind_hp = None, {}, 'lstm', {}
+    print('\n--- branchattn_temporal: temporal block of the VISUAL encoder ---')
     print('    Default: the original ConvLSTM2D of this graph (padding valid).')
+    print('    This answer is stored and used. It is not asked for architecture 4.')
     if _ask_yes_no('[branch] replace the visual temporal block?'):
         strategy = interactive_pick_temporal_strategy()
         name = interactive_pick_temporal_encoder(strategy, default=None)
@@ -1069,12 +1081,18 @@ def choose_branch_temporal_for_menu(opts, batch_size=None):
             if strategy == 'factorized':
                 _print_factorized_cost(name, {'batch_size': batch_size})
 
-    if opts.get('branch_mode') == 'temporal_concat':
+    mode = opts.get('branch_mode')
+    if mode == 'temporal_concat':
         print('[branch] temporal_concat = one LSTM, no branches: no BranchAttnPool, no aux heads, '
-              'no attention_log.json. Pick static_pool or core_plus_extras to get them.')
+              'no attention_log.json. The branch-kind question is not asked.')
     else:
-        print('\n--- branchattn: temporal block of each decoder BRANCH ---')
-        print('    The core LSTM of core_plus_extras always stays an LSTM (control).')
+        print('\n--- branchattn_temporal: temporal block of each EXTRA branch ---')
+        if mode == 'gated_add':
+            print('    The core LSTM stays an LSTM. Each residual uses the kind you pick.')
+        elif mode == 'core_plus_extras':
+            print('    The core LSTM stays an LSTM. Each extra span uses the kind you pick.')
+        else:
+            print('    static_pool: every decoder span, including bbox, uses the kind you pick.')
         if _ask_yes_no('[branch] replace the per-branch LSTM?'):
             for i, k in enumerate(BRANCH_KINDS, 1):
                 print(f'  {i}. {k}{" *" if k == "lstm" else ""}')
@@ -1091,13 +1109,13 @@ def choose_branch_temporal_for_menu(opts, batch_size=None):
                 kind_hp = {'n_state': _ask_int('n_state', 16),
                            'num_layers': _ask_int('num_layers', 1)}
 
-    opts['branch_visual_encoder'] = vis
+    opts['branch_visual_encoder'] = vis or 'convlstm2d'
     opts['branch_visual_hp'] = vis_hp
     opts['branch_temporal_kind'] = kind
     opts['branch_temporal_hp'] = kind_hp
     parts = ([vis] if vis else []) + ([] if kind == 'lstm' else [f'b{kind}'])
     opts['branch_tag'] = '_'.join(parts) or None
-    print(f"[config] BRANCH_VISUAL_ENCODER = {vis or 'convlstm2d (original)'} {vis_hp}")
+    print(f"[config] BRANCH_VISUAL_ENCODER = {opts['branch_visual_encoder']} {vis_hp}")
     print(f"[config] BRANCH_TEMPORAL_KIND  = {kind} {kind_hp}")
     return opts
 

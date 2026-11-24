@@ -1457,7 +1457,7 @@ class PIE(object):
         sq_ratio = params['squarify_ratio']
         height_rng = params['height_rng']
 
-        intention_prob, intention_binary = [], []
+        intention_prob, intention_binary, intention_3class = [], [], []
         image_seq, pids_seq = [], []
         box_seq, center_seq, occ_seq = [], [], []
         behavior_seq = None
@@ -1527,6 +1527,7 @@ class PIE(object):
 
                     intention_prob.append(int_prob[::seq_stride])
                     intention_binary.append(int_bin[::seq_stride])
+                    intention_3class.append([row[:] for row in int_3[::seq_stride]])
                     pids_seq.append(([[pid]] * len(boxes))[::seq_stride])
 
         print('Subset: %s' % image_set)
@@ -1539,7 +1540,7 @@ class PIE(object):
                 'occlusion': occ_seq,
                 'intention_prob': intention_prob,
                 'intention_binary': intention_binary,
-                'intention_3class': int_3,
+                'intention_3class': intention_3class,
                 'ped_id': pids_seq}
         data.update(behavior_seq or {})
         return data

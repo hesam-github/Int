@@ -19,20 +19,43 @@ class AttentionLogger(tf.keras.callbacks.Callback):
             if epoch == 0:
                 print("[attn] this architecture has no attention_model; logger idle")
             return
-        w = np.asarray(att.predict(self.val_dataset, verbose=0), dtype=np.float64)  # (N, K)
-        k = w.shape[1]
-        names = list(getattr(self.intent, "branch_names", [f"b{i}" for i in range(k)]))
+        w = np.asarray(att.predict(self.val_dataset, verbose=0), dtype=np.float64)
+        if w.ndim == 1:
+            w = w[:, None]
+        k = int(w.shape[1])
+        gate_names = list(getattr(self.intent, "gate_names", None) or [])
+        branch_names = list(getattr(self.intent, "branch_names", None) or [])
+        if len(gate_names) == k:
+            names = gate_names
+            kind = "gate"
+        elif len(branch_names) == k:
+            names = branch_names
+            kind = "softmax"
+        else:
+            names = [f"b{i}" for i in range(k)]
+            kind = "softmax"
         mean = w.mean(0)
-        entropy = float((-(w * np.log(w + 1e-12)).sum(1) / np.log(k)).mean())  # 1 = uniform, 0 = one-hot
-        top = np.bincount(w.argmax(1), minlength=k) / len(w)
-        rec = {"epoch": epoch + 1, "names": names, "mean": mean.tolist(),
-               "std": w.std(0, ddof=1).tolist(), "argmax_share": top.tolist(), "entropy": entropy}
-        self.records.append(rec)
-        print(f"epoch {epoch + 1}  attention")
-        parts = [f"{n}: mean={mean[i]:.3f} top1={top[i]:.3f}"
-                 for i, n in enumerate(names)]
-        parts.append(f"entropy={entropy:.3f} (1=uniform, 0=one branch)")
-        print("  " + " | ".join(parts))
+        row_sum = float(w.sum(1).mean())
+        if kind == "gate" or abs(row_sum - 1.0) > 0.15:
+            open_share = (w > 0.5).mean(0)
+            rec = {"epoch": epoch + 1, "names": names, "mean": mean.tolist(),
+                   "open_share": open_share.tolist(), "kind": "gate"}
+            self.records.append(rec)
+            print(f"epoch {epoch + 1}  residual gates")
+            parts = [f"{n}: mean={mean[i]:.3f} open={open_share[i]:.3f}"
+                     for i, n in enumerate(names)]
+            print("  " + " | ".join(parts))
+            print("  core_bbox_visual is not in this line: it is always added, weight=1")
+        else:
+            entropy = float((-(w * np.log(w + 1e-12)).sum(1) / np.log(max(k, 2))).mean())
+            top = np.bincount(w.argmax(1), minlength=k) / max(len(w), 1)
+            rec = {"epoch": epoch + 1, "names": names, "mean": mean.tolist(),
+                   "std": w.std(0, ddof=1).tolist() if len(w) > 1 else [0.0] * k,
+                   "argmax_share": top.tolist(), "entropy": entropy, "kind": "softmax"}
+            self.records.append(rec)
+            print(f"epoch {epoch + 1}  attention")
+            parts = [f"{n}: mean={mean[i]:.3f} top1={top[i]:.3f}" for i, n in enumerate(names)]
+            print("  " + " | ".join(parts) + f" | entropy={entropy:.3f} (1=uniform, 0=one branch)")
         tmp = self.save_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fid:
             json.dump(self.records, fid, indent=2)
