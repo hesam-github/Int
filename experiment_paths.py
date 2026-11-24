@@ -10,7 +10,7 @@ script so folder naming stays consistent and comparable.
 """
 
 import os
-MAX_RUN_DIR_LEN = 200 
+MAX_FOLDER_NAME_LEN = 120 
 
 def get_experiment_paths(pie_path, framework, architecture, run_name,
                           experiments_root=None, timestamp=None):
@@ -46,11 +46,14 @@ def get_experiment_paths(pie_path, framework, architecture, run_name,
         counter += 1
 
     run_dir = os.path.join(architecture_dir, run_folder_name)
-    if len(run_dir) > MAX_RUN_DIR_LEN:
+    if len(run_folder_name) > MAX_FOLDER_NAME_LEN:
         raise ValueError(
-            f"run_dir is {len(run_dir)} chars (limit {MAX_RUN_DIR_LEN}): {run_dir}\n"
-            f"Select fewer decoder features or use a shorter run-name prefix.")
-    os.makedirs(run_dir, exist_ok=True)
+            f"folder name is {len(run_folder_name)} chars (limit {MAX_FOLDER_NAME_LEN}): "
+            f"{run_folder_name}\n"
+            f"Use a shorter run-name prefix. Feature names belong in run_summary.txt, not here.")
+    if len(run_dir) > 240:
+        print(f"[warning] full path is {len(run_dir)} characters. Windows MAX_PATH is 260.")
+        os.makedirs(run_dir, exist_ok=True)
 
     log_dir = os.path.join(run_dir, 'logs')
     os.makedirs(log_dir, exist_ok=True)

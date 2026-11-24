@@ -208,7 +208,17 @@ def pick_run_options(hp):
         opts['loss_fn'] = 'categorical_crossentropy'
         print('[config] LOSS_FUNCTION (family) = categorical_crossentropy')
         print('[warning] val_auc for this task is macro one-vs-rest, not binary ROC-AUC.')
+        print('[protocol] Diving Deeper samples PIE intention with obs=15 and overlap=0.3.')
+        print('           Their test set is 6472 windows. Your DATA_OPTS overlap is not that protocol.')
+        print('           This does not copy their model, inputs, or balancing.')
+        raw = input('[protocol] use obs=15 and overlap=0.3 for this run? [y/N]: ').strip().lower()
+        opts['paper_protocol'] = raw in ('y', 'yes')
+        if opts['paper_protocol']:
+            print('[protocol] paper windowing ON. Turn balancing off if you want their raw class prior.')
+        else:
+            print('[protocol] paper windowing OFF. Do not put this run next to Table II.')
     else:
+        opts['paper_protocol'] = False
         opts['loss_name'], opts['loss_fn'] = interactive_pick_loss_choice(
             balance_mode=opts['balance_mode'])
         print(f"[config] LOSS_FUNCTION (family) = {opts['loss_name']}")
@@ -324,6 +334,12 @@ def prepare_data(opts, data_opts, pie_path):
     data_opts = copy.deepcopy(data_opts)
     data_opts['data_split_type'] = opts['split_type']
     data_opts.update(opts['split_opts'])
+    if opts.get('paper_protocol'):
+        data_opts['max_size_observe'] = 15
+        data_opts['min_track_size'] = 15
+        data_opts['seq_overlap_rate'] = 0.3
+        print('[protocol] max_size_observe=15  min_track_size=15  seq_overlap_rate=0.3')
+        print('[protocol] stride = int((1-0.3)*15) = 10 frames. Compare window counts with 8213/2299/6472.')
     if opts.get('task') == '3class':
         data_opts['output_type'] = ['intention_3class']
         print('[task] output_type = intention_3class')
@@ -493,6 +509,11 @@ def choose_run_identity(opts, data, hp, pie_path):
 
     decoder_features, feature_stds = interactive_pick_decoder_features(
         data['train'], use_visual=use_visual)
+    leaked = [name for name in decoder_features if str(name).startswith('intention_')]
+    if leaked:
+        raise ValueError(
+            f"{leaked} is the intention label, not an input. "
+            "The menu must not offer it. Do not train with the answer in the decoder.")
     data['data_opts']['decoder_input_type'] = decoder_features
     if 'bbox_branch' in decoder_features:
         attach_bbox_branch(data['train'], data['val'], data['test'])
@@ -602,7 +623,8 @@ def choose_run_identity(opts, data, hp, pie_path):
     short_tag = build_short_run_tag(
         opts['fusion'], opts['feature_target'], decoder_features,
         opts['split_type'], split_tag,
-        temporal_encoder=opts.get('temporal_encoder') or opts.get('branch_tag'))
+        temporal_encoder=opts.get('temporal_encoder') or opts.get('branch_tag'),
+        task=opts.get('task', 'binary'))
     if not use_visual:
         short_tag = 'NoVis_' + short_tag.replace('_context', '', 1)
 
@@ -719,7 +741,19 @@ def start_run(opts, hp, data, ident, pie_path):
         ('feature_norm', opts.get('feature_norm')),
         ('zero_visual', opts.get('zero_visual', False))])
 
-    write_run_summary(paths['run_dir'], ident['full_tag'], [
+    write_run_summary(        ('features and settings (not in the folder name)', [
+            ('decoder_features', ident['decoder_features']),
+            ('task', opts.get('task')),
+            ('paper_protocol', opts.get('paper_protocol')),
+            ('output_type', data['data_opts'].get('output_type')),
+            ('seq_overlap_rate', data['data_opts'].get('seq_overlap_rate')),
+            ('max_size_observe', data['data_opts'].get('max_size_observe')),
+            ('min_track_size', data['data_opts'].get('min_track_size')),
+            ('balance_mode', opts.get('balance_mode')),
+            ('backbone', opts.get('backbone')),
+            ('branch_mode', opts.get('branch_mode')),
+        ]),
+        paths['run_dir'], ident['full_tag'], [
         ('run identity', [
             ('architecture', ident['architecture']),
             ('run_name (folder)', paths['run_folder_name']),
@@ -876,7 +910,7 @@ def evaluate_run(model, data, saved, paths, history, hp):
         print('[eval] They are not the Diving Deeper table. Observation length, overlap and the metric definition differ.')
         return dict(metrics=None, metrics_calibrated=None, threshold=None,
                     metrics_prior_corrected=None, metrics_custom=None)
-                    
+
     splits = (('train', data['train']), ('val', data['val']), ('test', data['test']))
 
     print_phase(PHASE_FULL_EVAL)

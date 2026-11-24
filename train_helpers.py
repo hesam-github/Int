@@ -1536,15 +1536,20 @@ def build_run_hyperparam_tag(REGULARIZER_VAL, clip_type, clip_amount, balance_mo
     )
 
 def build_short_run_tag(fusion, feature_target, decoder_features, split_type, split_tag,
-                        temporal_encoder=None):
-    """Folder-name tag: architecture + (temporal encoder) + feature names + split only.
-    Every other choice is written to run_summary.txt inside the run folder.
-    kfold keeps its full split_tag because find_kfold_run_dirs() parses 'kfold<N>_f<K>' from the name."""
+                        temporal_encoder=None, task='binary'):
+    """Folder name: architecture, optional temporal block, task, split.
+
+    Feature names are NOT included. Windows rejects long path components,
+    and the feature list belongs in run_summary.txt / choices.json.
+    decoder_features is still an argument so the caller does not change,
+    and so build_arch_tag can count branches. The names themselves are not written.
+    kfold keeps its full split_tag because find_kfold_run_dirs() parses 'kfold<N>_f<K>'.
+    """
     arch_tag = build_arch_tag(fusion, feature_target, decoder_features)
     enc_tag = f"_{temporal_encoder}" if temporal_encoder else ""
-    feat_tag = build_feature_tag(decoder_features)
+    task_tag = '3c' if task == '3class' else 'bin'
     short_split = 'randomSplit' if split_type == 'random' else split_tag
-    return f"{arch_tag}{enc_tag}_{feat_tag}_{short_split}"
+    return f"{arch_tag}{enc_tag}_{task_tag}_{short_split}"
 
 
 def write_run_summary(run_dir, full_tag, sections):
@@ -2188,7 +2193,7 @@ def interactive_pick_decoder_features(beh_seq, use_visual=True):
     feature_stds = print_feature_diagnostics(beh_seq)
     skip = {
         'image', 'images', 'ped_id', 'pid', 'bbox', BBOX_BRANCH,
-        'intention_binary', 'intention_prob',
+        'intention_binary', 'intention_prob', 'intention_3class',
     }
     leaky = {'obd_speed', 'gps_speed', 'speed'}
     human_labels = {'look', 'action', 'gesture', 'cross'}
@@ -2219,7 +2224,10 @@ def interactive_pick_decoder_features(beh_seq, use_visual=True):
     else:
         header = "[decoder_features] NO-VGG mode: bbox (always) + optional extras (none need VGG16):"
         bbox_label = "bbox only  (raw bbox, 4 numbers; NO VGG16)"
-
+    if 'intention_3class' in beh_seq:
+        print('[warning] intention_3class is the 3-class LABEL, a one-hot of intention_prob.', flush=True)
+        print('          It is not offered as a decoder feature. Feeding it to the LSTM is label leakage.', flush=True)
+        print('          The large class gap is the answer itself, not a useful cue.', flush=True)
     print(f"\n{header}", flush=True)
     print(f"  [0] {bbox_label}  <-- default", flush=True)
     for i, (key, width) in enumerate(options, start=1):
@@ -2374,7 +2382,10 @@ def print_feature_diagnostics(beh_seq):
         t = np.asarray(t).ravel()
         y_all.append(int(t[0]) if t.size else -1)
     y_all = np.asarray(y_all, dtype=int)
-    skip = {'image', 'images', 'ped_id', 'pid', 'intention_binary', 'intention_prob'}
+    skip = {
+        'image', 'images', 'ped_id', 'pid',
+        'intention_binary', 'intention_prob', 'intention_3class',
+    }
 
     for name, tracks in beh_seq.items():
         if name in skip or not isinstance(tracks, (list, tuple)):

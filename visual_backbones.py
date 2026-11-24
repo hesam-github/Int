@@ -16,9 +16,14 @@ def build_extractor(name):
         model = vgg16.VGG16(input_shape=(224, 224, 3), include_top=False, weights="imagenet")
         return model.predict_on_batch, vgg16.preprocess_input, "vgg16", 512
     if name == "resnet50":
-        from keras.applications import resnet50
-        model = resnet50.ResNet50(input_shape=(224, 224, 3), include_top=False, weights="imagenet")
-        return model.predict_on_batch, resnet50.preprocess_input, "resnet50", 2048
+        from keras.applications.resnet50 import ResNet50, preprocess_input
+
+        model = ResNet50(
+            input_shape=(224, 224, 3),
+            include_top=False,
+            weights="imagenet"
+        )
+        return model.predict_on_batch, preprocess_input, "resnet50", 2048
     if name == "vit_b16":
         import torch
         from torchvision.models import vit_b_16, ViT_B_16_Weights

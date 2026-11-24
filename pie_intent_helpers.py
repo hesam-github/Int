@@ -97,6 +97,80 @@ def compute_full_metrics(y_true, y_prob, save_path=None, threshold=0.5):
             json.dump(metrics, fid, indent=2)
     return metrics
 
+def compute_multiclass_metrics(y_true, y_prob):
+    """3-class intention metrics. Not binary metrics with the same key names.
+
+    y_true: (N, C) one-hot or (N,) class ids. y_prob: (N, C) softmax.
+    balanced_acc is macro recall. roc_auc is macro one-vs-rest.
+    recall_nci / recall_ui / recall_ci are the three class recalls
+    (no-crossing, unsure, crossing) when C is 3.
+    """
+    from sklearn.metrics import (
+        accuracy_score, precision_score, recall_score, f1_score,
+        roc_auc_score, average_precision_score, log_loss,
+        balanced_accuracy_score, confusion_matrix,
+    )
+
+    y_prob = np.asarray(y_prob, dtype=float)
+    if y_prob.ndim != 2 or y_prob.shape[1] < 2:
+        raise ValueError(f'expected softmax (N, C), got {y_prob.shape}')
+    n_class = int(y_prob.shape[1])
+    y_arr = np.asarray(y_true)
+    if y_arr.ndim == 2:
+        y = y_arr.argmax(axis=1).astype(int)
+    else:
+        y = y_arr.astype(int).ravel()
+    pred = y_prob.argmax(axis=1)
+    labels = list(range(n_class))
+    names = ['nci', 'ui', 'ci']
+
+    accuracy = accuracy_score(y, pred)
+    precision = precision_score(y, pred, average='macro', zero_division=0, labels=labels)
+    recall = recall_score(y, pred, average='macro', zero_division=0, labels=labels)
+    f1 = f1_score(y, pred, average='macro', zero_division=0, labels=labels)
+    balanced_acc = balanced_accuracy_score(y, pred)
+    per_recall = recall_score(y, pred, average=None, zero_division=0, labels=labels)
+    try:
+        roc_auc = roc_auc_score(
+            y, y_prob, multi_class='ovr', average='macro', labels=labels)
+    except ValueError:
+        roc_auc = float('nan')
+    try:
+        one_hot = np.eye(n_class, dtype=float)[y]
+        pr_auc = average_precision_score(one_hot, y_prob, average='macro')
+    except ValueError:
+        pr_auc = float('nan')
+    nll = log_loss(y, np.clip(y_prob, 1e-7, 1.0 - 1e-7), labels=labels)
+    cm = confusion_matrix(y, pred, labels=labels)
+    specs = []
+    for i in range(n_class):
+        tp = cm[i, i]
+        fn = cm[i].sum() - tp
+        fp = cm[:, i].sum() - tp
+        tn = cm.sum() - tp - fn - fp
+        specs.append(float(tn / (tn + fp)) if (tn + fp) else 0.0)
+    counts = np.bincount(y, minlength=n_class)
+    confidence = y_prob.max(axis=1)
+    metrics = {
+        'accuracy': float(accuracy),
+        'majority_acc': float(counts.max() / max(len(y), 1)),
+        'precision': float(precision),
+        'recall': float(recall),
+        'specificity': float(np.mean(specs)),
+        'balanced_acc': float(balanced_acc),
+        'f1': float(f1),
+        'roc_auc': float(roc_auc),
+        'pr_auc': float(pr_auc),
+        'nll': float(nll),
+        'ece': float('nan'),
+        'pred_mean': float(confidence.mean()),
+        'pred_std': float(confidence.std()),
+        'n_test_samples': int(len(y)),
+        'confusion_matrix': cm.tolist(),
+    }
+    for i, name in enumerate(names[:n_class]):
+        metrics[f'recall_{name}'] = float(per_recall[i])
+    return metrics
 
 CACHE_READ_WORKERS = 8
 _TRACE_LOG_PATH = os.path.join(os.environ['PIE_PATH'], 'trace_main.log')

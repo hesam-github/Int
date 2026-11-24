@@ -53,6 +53,7 @@ from log_mode import phase, vprint, is_full
 from pie_intent_helpers import (
     _safe_update_progress,
     compute_full_metrics,
+    compute_multiclass_metrics,
     CACHE_READ_WORKERS,
     trace_log,
     start_gpu_watchdog,
@@ -773,6 +774,14 @@ class PIEIntent(object):
                                                  data_opts['seq_overlap_rate'])
                 test_d['output'] = test_d['output'][:, 0]
 
+            n_test = 0 if test_d is None else len(test_d['output'])
+            print(f"[windows] train={len(train_d['output'])} val={len(val_d['output'])} "
+                  f"test={n_test} obs={seq_length} overlap={data_opts['seq_overlap_rate']}")
+            if "intention_3class" in data_opts["output_type"]:
+                print("[task] Diving Deeper PIE intention windows: train=8213 val=2299 test=6472")
+                print("[task] at obs=15 and overlap=0.3, before a second balancing step.")
+                print("[task] Do not compare these metrics with the action-prediction table.")
+
             test_dataset = None
             if getattr(self, 'use_visual', True):
                 self._ensure_context_model()
@@ -998,21 +1007,46 @@ class PIEIntent(object):
                     self.history = []
 
                 def _predict_main(self, dataset):
-                    """Main-output probabilities; keeps every head's output for _head_aucs()."""
+                    """Main-output probabilities. Keeps every head for _head_aucs()."""
                     out = self.model.predict(dataset, verbose=0)
                     self._all_outputs = list(out) if isinstance(out, (list, tuple)) else [out]
-                    return np.asarray(self._all_outputs[0]).ravel()
+                    arr = np.asarray(self._all_outputs[0])
+                    if arr.ndim == 2 and arr.shape[-1] > 1:
+                        return arr
+                    return arr.ravel()
+
+                def _score(self, y_true, prob):
+                    """Binary table, or 3-class macro metrics when prob is (N, C)."""
+                    prob = np.asarray(prob)
+                    if prob.ndim == 2 and prob.shape[-1] > 1:
+                        return compute_multiclass_metrics(y_true, prob)
+                    metrics = compute_full_metrics(y_true, prob)
+                    flat = prob.ravel()
+                    metrics['pred_mean'] = float(flat.mean())
+                    metrics['pred_std'] = float(flat.std())
+                    return metrics
 
                 def _head_aucs(self):
-                    """Per-branch AUC on val (only when aux heads exist). Call right after _predict_main(val)."""
+                    """Per-branch AUC on val. Macro one-vs-rest when the head is 3-class."""
                     from sklearn.metrics import roc_auc_score
-                    y = np.asarray(self.val_y_true).ravel()
+                    y_raw = np.asarray(self.val_y_true)
+                    multiclass = y_raw.ndim == 2 and y_raw.shape[-1] > 1
+                    y = y_raw.argmax(1) if multiclass else y_raw.ravel()
                     result = {}
+                    labels = list(range(y_raw.shape[-1])) if multiclass else None
                     for name, out in zip(self.model.output_names[1:], self._all_outputs[1:]):
-                        p = np.asarray(out).ravel()
-                        result[name] = float(roc_auc_score(y, p)) if len(np.unique(y)) > 1 else float('nan')
+                        p = np.asarray(out)
+                        if multiclass and p.ndim == 2 and p.shape[-1] == y_raw.shape[-1]:
+                            try:
+                                result[name] = float(roc_auc_score(
+                                    y, p, multi_class='ovr', average='macro', labels=labels))
+                            except ValueError:
+                                result[name] = float('nan')
+                        else:
+                            p = p.ravel()
+                            result[name] = (float(roc_auc_score(y, p))
+                                            if len(np.unique(y)) > 1 else float('nan'))
                     return result
-
                 def _should_run_full_train_eval(self, epoch):
                     if self.eval_every is None:
                         return False
@@ -1024,9 +1058,8 @@ class PIEIntent(object):
                     logs = logs or {}
 
                     val_prob = self._predict_main(self.val_dataset)
-                    val_m = compute_full_metrics(self.val_y_true, val_prob)
-                    val_m['pred_mean'] = float(val_prob.mean())
-                    val_m['pred_std'] = float(val_prob.std())
+                    val_m = self._score(self.val_y_true, val_prob)
+
                     head_auc = self._head_aucs() if len(self._all_outputs) > 1 else {}
                     logs['val_nll'] = val_m['nll']
                     logs['val_auc'] = val_m['roc_auc'] if not np.isnan(val_m['roc_auc']) else 0.0
@@ -1053,18 +1086,15 @@ class PIEIntent(object):
                     train_m = None
                     if run_full_train:
                         train_prob = self._predict_main(self.train_eval_dataset)
-                        train_m = compute_full_metrics(self.train_y_true, train_prob)
-                        train_m['pred_mean'] = float(train_prob.mean())
-                        train_m['pred_std'] = float(train_prob.std())
+                        train_m = self._score(self.train_y_true, train_prob)
+
 
                     test_m = None
                     test_loss = None
                     test_parts = None
                     if self.test_dataset is not None and run_full_train:
                         test_prob = self._predict_main(self.test_dataset)
-                        test_m = compute_full_metrics(self.test_y_true, test_prob)
-                        test_m['pred_mean'] = float(test_prob.mean())
-                        test_m['pred_std'] = float(test_prob.std())
+                        test_m = self._score(self.test_y_true, test_prob)
                         test_eval = self.model.evaluate(self.test_dataset, verbose=0)
                         if isinstance(test_eval, (list, tuple)):
                             named = dict(zip(self.model.metrics_names, test_eval))
@@ -1104,6 +1134,10 @@ class PIEIntent(object):
                             ("pmean", m["pred_mean"]),
                             ("pstd", m["pred_std"]),
                         ]
+                        extra = [(n, m[n]) for n in ('recall_nci', 'recall_ui', 'recall_ci') if n in m]
+                        if extra:
+                            print(" | ".join(f"{n}={v:.4f}" for n, v in extra))
+                            print("  3-class: auc=macro one-vs-rest, balanced_acc=macro recall. Not binary.")
                         print(f"  {title}")
                         print(" | ".join(f"{n}={v:.4f}" for n, v in row1))
                         print(" | ".join(f"{n}={v:.4f}" for n, v in row2))
