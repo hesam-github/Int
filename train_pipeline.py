@@ -55,6 +55,7 @@ from train_helpers import (
     interactive_pick_use_visual,
     interactive_pick_backbone,
     interactive_pick_offline_features,
+    interactive_pick_flow_representation,
     interactive_pick_balance_mode,
     interactive_pick_clip_mode,
     interactive_pick_data_split,
@@ -185,6 +186,12 @@ def pick_run_options(hp):
     print(f"[config] LOG_MODE = {opts['log_mode']}")
 
     opts['balance_mode'] = interactive_pick_balance_mode()
+    opts['flow_representation'] = 'summary'
+    if 'flow' in opts['offline'] and opts['balance_mode'] != 'augmentation':
+        opts['flow_representation'] = interactive_pick_flow_representation(
+            opts['architecture'], opts.get('branch_mode'))
+    elif 'flow' in opts['offline']:
+        print('[flow] augmentation mode cannot use dense flow. Representation stays summary, and summaries are still skipped.')
     print(f"[config] BALANCE_MODE = {opts['balance_mode']}")
     opts['val_augment_mode'] = (interactive_pick_val_augment_mode()
                                 if opts['balance_mode'] == 'augmentation' else None)
@@ -401,15 +408,19 @@ def prepare_data(opts, data_opts, pie_path):
 
     if 'flow' in offline and opts['balance_mode'] != 'augmentation':
         _require_dir(flow_dir, 'flow')
-        from extra_features import attach_flow, attach_flow_relative, attach_flow_residual_stats, attach_flow_critical
+        if opts.get('flow_representation') == 'dense':
+            _require_dir(os.path.join(flow_dir, 'crop_full'), 'flow')
+            print('[flow] dense: crop_full only. flow_critical, flow_res and the other summaries are not attached.')
+        else:
+            from extra_features import attach_flow, attach_flow_relative, attach_flow_residual_stats, attach_flow_critical
 
-        def attach_flow_family(split, verbose):
-            attach_flow(split, flow_dir, verbose=verbose)
-            attach_flow_relative(split, verbose=verbose)
-            attach_flow_residual_stats(split, flow_dir, verbose=verbose)
-            attach_flow_critical(split, flow_dir, verbose=verbose)
+            def attach_flow_family(split, verbose):
+                attach_flow(split, flow_dir, verbose=verbose)
+                attach_flow_relative(split, verbose=verbose)
+                attach_flow_residual_stats(split, flow_dir, verbose=verbose)
+                attach_flow_critical(split, flow_dir, verbose=verbose)
 
-        attach_with_cache('flow', splits, cache_path('flow_crit1'), attach_flow_family)
+            attach_with_cache('flow', splits, cache_path('flow_crit1'), attach_flow_family)
 
     lens = [len(track) for track in train['image']]
     print(f"tracks={len(lens)}  min_len={min(lens)}  max_len={max(lens)}")
@@ -754,6 +765,7 @@ def start_run(opts, hp, data, ident, pie_path):
             ('balance_mode', opts.get('balance_mode')),
             ('backbone', opts.get('backbone')),
             ('branch_mode', opts.get('branch_mode')),
+            ('flow_representation', opts.get('flow_representation', 'summary')),
         ]),
         ('run identity', [
             ('architecture', ident['architecture']),
@@ -815,6 +827,9 @@ def start_run(opts, hp, data, ident, pie_path):
     model.use_visual = opts.get('use_visual', True)
     model.backbone_name = opts.get('backbone') or 'vgg16'
     model.extra_input_dropout = 0.0
+    model.flow_representation = opts.get('flow_representation', 'summary')
+    model.flow_root = os.path.join(pie_path, 'extra', 'flow')
+    print(f"[config] flow_representation={model.flow_representation}")
     model.capacity = opts.get('capacity')
     cap = opts.get('capacity') or {}
     if cap.get('hidden_units') and int(cap['hidden_units']) != model._num_hidden_units:

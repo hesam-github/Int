@@ -511,12 +511,19 @@ class PIEIntent(object):
         if getattr(self, 'use_visual', True):
             self._ensure_context_model()
 
-        return {'images': images,
-                'bboxes': bboxes,
-                'ped_ids': ped_ids,
-                'encoder_input': encoder_input,
-                'decoder_input': decoder_input,
-                'output': output}
+        packed = {'images': images,
+                  'bboxes': bboxes,
+                  'ped_ids': ped_ids,
+                  'encoder_input': encoder_input,
+                  'decoder_input': decoder_input,
+                  'output': output}
+        if getattr(self, 'flow_representation', 'summary') == 'dense':
+            from flow_dense import ensure_flow_volume
+            tag = 'fit' if fit_extra_norm else 'eval'
+            cache = os.path.join(self.flow_root, 'summary', 'dense32',
+                                 f'{tag}_{len(images)}_{seq_length}.npy')
+            packed['flow'] = ensure_flow_volume(images, ped_ids, self.flow_root, cache)
+        return packed
 
     def get_test_data(self, data, train_params, seq_length, overlap, data_subset='test'):
         """Builds windowed test data and runs load_images_and_process to
@@ -551,7 +558,15 @@ class PIEIntent(object):
                                                                         model_name=self._feature_cache_name(),
                                                                         data_subset=data_subset))
         output = output[:, 0]
-        return ([test_img, decoder_input], output)
+        arrays = [test_img, decoder_input]
+        if getattr(self, 'flow_representation', 'summary') == 'dense':
+            from flow_dense import ensure_flow_volume
+            cache = os.path.join(
+                self.flow_root, 'summary', 'dense32',
+                f'{data_subset}_{len(images)}_{seq_length}_{overlap}.npy')
+            arrays.append(np.asarray(
+                ensure_flow_volume(images, ped_ids, self.flow_root, cache), np.float32))
+        return (arrays, output)
 
     def get_model(self, model):
         train_model = self.pie_convlstm_encdec()
@@ -680,7 +695,7 @@ class PIEIntent(object):
         return np.memmap(final_path, dtype=np.float32, mode="r", shape=shape)
 
     def _dataset_from_memmap(self, feature_mmap, decoder, output, batch_size, shuffle, repeat,
-                             shuffle_seed=None):
+                             shuffle_seed=None, flow=None):
         decoder = np.asarray(decoder, dtype=np.float32)
         output = np.asarray(output, dtype=np.float32)
         n = int(feature_mmap.shape[0])
@@ -691,19 +706,33 @@ class PIEIntent(object):
             order = rng.permutation(n) if shuffle else np.arange(n)
             for start in range(0, n, batch_size):
                 index = order[start:start + batch_size]
-                yield (np.ascontiguousarray(feature_mmap[index]),
-                    decoder[index],
-                    output[index])
+                if flow is None:
+                    yield (np.ascontiguousarray(feature_mmap[index]),
+                        decoder[index],
+                        output[index])
+                else:
+                    yield (np.ascontiguousarray(feature_mmap[index]),
+                        decoder[index],
+                        np.asarray(flow[index], np.float32),
+                        output[index])
 
-        dataset = tf.data.Dataset.from_generator(
-            gen,
-            output_signature=(
+        if flow is None:
+            signature = (
                 tf.TensorSpec(shape=(None,) + feature_mmap.shape[1:], dtype=tf.float32),
                 tf.TensorSpec(shape=(None,) + decoder.shape[1:], dtype=tf.float32),
                 tf.TensorSpec(shape=(None,) + output.shape[1:], dtype=tf.float32),
-            ),
-        )
-        dataset = dataset.map(lambda enc, dec, y: ((enc, dec), y))
+            )
+            dataset = tf.data.Dataset.from_generator(gen, output_signature=signature)
+            dataset = dataset.map(lambda enc, dec, y: ((enc, dec), y))
+        else:
+            signature = (
+                tf.TensorSpec(shape=(None,) + feature_mmap.shape[1:], dtype=tf.float32),
+                tf.TensorSpec(shape=(None,) + decoder.shape[1:], dtype=tf.float32),
+                tf.TensorSpec(shape=(None,) + tuple(flow.shape[1:]), dtype=tf.float32),
+                tf.TensorSpec(shape=(None,) + output.shape[1:], dtype=tf.float32),
+            )
+            dataset = tf.data.Dataset.from_generator(gen, output_signature=signature)
+            dataset = dataset.map(lambda enc, dec, flow_b, y: ((enc, dec, flow_b), y))
         if repeat:
             dataset = dataset.repeat()
         return dataset.prefetch(1)
@@ -821,16 +850,20 @@ class PIEIntent(object):
 
                 train_dataset = self._dataset_from_memmap(
                     train_mmap, train_d['decoder_input'], train_d['output'],
-                    batch_size, shuffle=True, repeat=True, shuffle_seed=shuffle_seed)
+                    batch_size, shuffle=True, repeat=True, shuffle_seed=shuffle_seed,
+                    flow=train_d.get('flow'))
+
                 train_eval_dataset = self._dataset_from_memmap(
                     train_mmap, train_d['decoder_input'], train_d['output'],
-                    batch_size, shuffle=False, repeat=False)
+                    batch_size, shuffle=False, repeat=False, flow=train_d.get('flow'))
+
                 val_dataset = self._dataset_from_memmap(
                     val_mmap, val_d['decoder_input'], val_d['output'],
-                    batch_size, shuffle=False, repeat=True)
+                    batch_size, shuffle=False, repeat=True, flow=train_d.get('flow'))
+                
                 val_eval_dataset = self._dataset_from_memmap(
                     val_mmap, val_d['decoder_input'], val_d['output'],
-                    batch_size, shuffle=False, repeat=False)
+                    batch_size, shuffle=False, repeat=False, flow=train_d.get('flow'))
 
                 train_steps = (train_mmap.shape[0] + batch_size - 1) // batch_size
                 val_steps = (val_mmap.shape[0] + batch_size - 1) // batch_size
@@ -965,6 +998,8 @@ class PIEIntent(object):
                 'zero_decoder_bbox': getattr(self, 'zero_decoder_bbox', False),
                 'aux_loss_weight': float(getattr(self, 'aux_loss_weight', 0.0) or 0.0),
                 'extra_input_dropout': getattr(self, 'extra_input_dropout', None),
+                'flow_representation': getattr(self, 'flow_representation', 'summary'),
+                'flow_root': getattr(self, 'flow_root', None),
             }
             with open(hyperparams_path, 'w', encoding='utf-8') as fid:
                 json.dump(hyperparams, fid, indent=2, default=str)
@@ -1411,10 +1446,13 @@ class PIEIntent(object):
                                                                             overlap)
 
             with tf.device('/CPU:0'):
-                predict_dataset = tf.data.Dataset.from_tensor_slices(
-                    {'encoder_input': test_data_chunk[0],
-                    'decoder_input': test_data_chunk[1]}
-                ).batch(32)
+                predict_inputs = {
+                    'encoder_input': test_data_chunk[0],
+                    'decoder_input': test_data_chunk[1],
+                }
+                if len(test_data_chunk) == 3:
+                    predict_inputs['flow_input'] = test_data_chunk[2]
+                predict_dataset = tf.data.Dataset.from_tensor_slices(predict_inputs).batch(32)
 
             test_results_chunk = test_model.predict(predict_dataset, verbose=1)
             del predict_dataset, test_data_chunk

@@ -2601,6 +2601,32 @@ def interactive_pick_offline_features(default='all'):
             continue
         return [families[i][0] for i in dict.fromkeys(idx)]
 
+
+def interactive_pick_flow_representation(architecture, branch_mode):
+    """summary keeps the current 8-d path. dense uses crop_full maps."""
+    allowed = architecture in ('branchattn', 'branchattn_temporal') and branch_mode in (
+        'static_pool', 'core_plus_extras', 'gated_add')
+    print('\n[flow_representation] how should optical flow enter the model?', flush=True)
+    print('  [0] summary  -- current flow_* vectors, including the 8-d flow_critical  <-- default', flush=True)
+    print('  [1] dense    -- resize saved crop_full maps to 32x32 and encode that field', flush=True)
+    print('      The 8-d summary is not attached. Pose, scene, bbox and VGG stay as selected.', flush=True)
+    print('      This is not Kinetics I3D and not the action-prediction AUC.', flush=True)
+    print('      Read aux AUC of flow_dense. The main AUC is not a flow-only result.', flush=True)
+    if not allowed:
+        print('  dense needs branchattn or branchattn_temporal, and a per-branch fusion.', flush=True)
+        print('  temporal_concat, pie_convlstm and decoder_only keep the summary.', flush=True)
+        print('[config] FLOW_REPRESENTATION = summary', flush=True)
+        return 'summary'
+    while True:
+        raw = input('[flow_representation] 0/1 [default: 0]: ').strip()
+        if raw in ('', '0'):
+            print('[config] FLOW_REPRESENTATION = summary', flush=True)
+            return 'summary'
+        if raw == '1':
+            print('[config] FLOW_REPRESENTATION = dense', flush=True)
+            return 'dense'
+        print('  ! enter 0 or 1.', flush=True)
+
 def interactive_pick_zero_decoder_bbox(use_visual=True):
     """Normal run, or visual-only diagnostic: decoder bbox columns (and bbox_branch) set to 0.
     Without VGG16 there is no input left, so zeroing is refused."""

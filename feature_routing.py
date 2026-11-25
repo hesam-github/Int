@@ -29,7 +29,8 @@ use_visual=False -> decoder-only model, no VGG16 input at all.
 import numpy as np
 import tensorflow as tf
 from keras.layers import (Concatenate, ConvLSTM2D, Dense, Dropout, Flatten, Input, LSTM,
-                          RepeatVector, Conv2D, TimeDistributed,Add, Multiply)
+                          RepeatVector, Conv2D, TimeDistributed, Add, Multiply,
+                          GlobalAveragePooling2D)
 from keras.models import Model
 from visual_norm import ChannelStandardize, visual_op_order
 from utils import PIE_IMG_WIDTH, PIE_IMG_HEIGHT
@@ -289,6 +290,8 @@ def restore_routing(model, hyperparams):
     model.percentile_scale = hyperparams.get('percentile_scale')
     model.pose_scale = hyperparams.get('pose_scale', 'bbox_relative')
     model.zero_decoder_bbox = hyperparams.get('zero_decoder_bbox', False)
+    model.flow_representation = hyperparams.get('flow_representation', 'summary')
+    model.flow_root = hyperparams.get('flow_root')
     spans = hyperparams.get('feature_spans')
     model.feature_spans = [tuple(s) for s in spans] if spans else None
 
@@ -334,6 +337,8 @@ def build_intention_model(intent):
         print("[config] branchattn: feature_target forced to decoder (no tiling onto the VGG map)")
         target = 'decoder'
     attn_weights = None
+    flow_in = None
+    flow_seq = None
     print(f"[config] fusion={fusion} feature_target={target} "
           f"decoder_width={width} extra_width={extra_width}")
 
@@ -483,6 +488,18 @@ def build_intention_model(intent):
         if mode == 'temporal_concat' and branch_kind != 'lstm':
             print(f"[warning] temporal_concat has no branches; branch kind '{branch_kind}' ignored")
         print(f"[config] branch_temporal_kind={branch_kind} {branch_hp}")
+        if getattr(intent, 'flow_representation', 'summary') == 'dense':
+            if mode == 'temporal_concat':
+                raise ValueError('dense flow has no branch in temporal_concat. Choose gated_add, core_plus_extras, or static_pool.')
+            flow_in = Input(
+                shape=(intent._decoder_seq_length, 32, 32, 2),
+                name='flow_input')
+            flow_seq = TimeDistributed(
+                GlobalAveragePooling2D(), name='flow_gap')(
+                ConvLSTM2D(
+                    filters=16, kernel_size=3, padding='same',
+                    return_sequences=True, name='flow_convlstm')(flow_in))
+            print('[flow dense] input (15, 32, 32, 2) -> ConvLSTM 16 -> GAP -> branch flow_dense')
 
         if mode == 'static_pool':
             vis_h = Dense(units, activation='tanh', name='vis_proj',
@@ -494,9 +511,14 @@ def build_intention_model(intent):
                     branch_kind, feat_name, part, units, extra_kw, hp=branch_hp,
                     dropout=extra_do, l2_value=intent.reg_value, attention=attn)
                 branches.append(out)
+            if flow_seq is not None:
+                branches.append(make_sequence_branch(
+                    branch_kind, 'flow_dense', flow_seq, units, extra_kw, hp=branch_hp,
+                    dropout=extra_do, l2_value=intent.reg_value, attention=attn))
             hidden, attn_weights = BranchAttnPool(
                 len(branches), return_weights=True, name='branch_attention')(branches)
-            intent.branch_names = ['visual'] + [s[0] for s in spans]
+            intent.branch_names = ['visual'] + [s[0] for s in spans] + (
+                ['flow_dense'] if flow_seq is not None else [])
 
         elif mode == 'temporal_concat':
             if temporal:
@@ -523,6 +545,11 @@ def build_intention_model(intent):
                     dropout=extra_do, l2_value=intent.reg_value, attention=attn)
                 branches.append(out)
                 names.append(feat_name)
+            if flow_seq is not None:
+                branches.append(make_sequence_branch(
+                    branch_kind, 'flow_dense', flow_seq, units, extra_kw, hp=branch_hp,
+                    dropout=extra_do, l2_value=intent.reg_value, attention=attn))
+                names.append('flow_dense')
             if len(branches) == 1:
                 hidden = core
             else:
@@ -556,6 +583,18 @@ def build_intention_model(intent):
                 names.append(feat_name)
                 gates.append(gate)
                 gate_names.append(feat_name)
+            if flow_seq is not None:
+                rel = make_sequence_branch(
+                    branch_kind, 'flow_dense', flow_seq, units, extra_kw, hp=branch_hp,
+                    dropout=extra_do, l2_value=intent.reg_value, attention=attn)
+                gate = Dense(1, activation='sigmoid', name='gate_flow_dense')(
+                    Concatenate(name='gate_in_flow_dense')([core, rel]))
+                residual = Add(name='add_flow_dense')([
+                    residual, Multiply(name='gated_flow_dense')([gate, rel])])
+                branches.append(rel)
+                names.append('flow_dense')
+                gates.append(gate)
+                gate_names.append('flow_dense')
             hidden = residual
             intent.branch_names = names
             intent.gate_names = gate_names
@@ -598,20 +637,21 @@ def build_intention_model(intent):
         kernel_regularizer=intent._kernel_regularizer,
         bias_regularizer=intent._bias_regularizer,
         name="decoder_dense")(hidden)
-
+    model_inputs = [maps_in, dec_in] if flow_in is None else [maps_in, dec_in, flow_in]
     if aux_outputs:
+
         model = Model(
-            inputs=[maps_in, dec_in],
+            inputs=model_inputs,
             outputs=[output] + aux_outputs,
             name='model'
         )
         intent.aux_output_count = len(aux_outputs)
     else:
-        model = Model(inputs=[maps_in, dec_in], outputs=output, name='model')
+        model = Model(inputs=model_inputs, outputs=output, name='model')
         intent.aux_output_count = 0
 
     if attn_weights is not None:
-        intent.attention_model = Model(inputs=[maps_in, dec_in], outputs=attn_weights)
+        intent.attention_model = Model(inputs=model_inputs, outputs=attn_weights)
     # --- Auxiliary heads for multimodal learning (optional) ---
     intent.aux_train_model = None
     intent.aux_head_names = []
@@ -633,7 +673,7 @@ def build_intention_model(intent):
                 name=f'aux_{name}')(branch))
         intent.aux_head_names = [f'aux_{n}' for n in intent.branch_names]
         intent.aux_train_model = Model(
-            inputs=[maps_in, dec_in],
+            inputs=model_inputs,
             outputs=[output] + heads,
             name='model_aux')
         print(f"[config] aux heads (train only): {intent.aux_head_names}")
