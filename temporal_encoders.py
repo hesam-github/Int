@@ -751,6 +751,8 @@ def build_pie_temporal_model(encoder_name,
     elif mode == 'adaptive_branches':
         from feature_routing import SliceColumns, BranchAttnPool
         visual_vec = context  # (B, d_model)
+        kin_parts = []
+        geo_parts = []
 
         kin_names = {'bbox', 'velocity', 'flow_bbox', 'flow_crop', 'flow_ped'}
         print("[temporal] adaptive kin = bbox, velocity, flow_bbox, flow_crop, flow_ped. "
