@@ -97,13 +97,14 @@ def compute_full_metrics(y_true, y_prob, save_path=None, threshold=0.5):
             json.dump(metrics, fid, indent=2)
     return metrics
 
-def compute_multiclass_metrics(y_true, y_prob):
-    """3-class intention metrics. Not binary metrics with the same key names.
+def compute_multiclass_metrics(y_true, y_prob, save_path=None):
+    """3-class intention metrics. Decision is argmax, not a threshold.
 
     y_true: (N, C) one-hot or (N,) class ids. y_prob: (N, C) softmax.
-    balanced_acc is macro recall. roc_auc is macro one-vs-rest.
-    recall_nci / recall_ui / recall_ci are the three class recalls
-    (no-crossing, unsure, crossing) when C is 3.
+    Macro balanced_acc is macro recall. Macro roc_auc is one-vs-rest.
+    For each class (nci, ui, ci): precision, recall, specificity, f1,
+    one-vs-rest AUC, one-vs-rest AP, and support.
+    ece is top-label ECE: confidence is the max softmax entry.
     """
     from sklearn.metrics import (
         accuracy_score, precision_score, recall_score, f1_score,
@@ -114,6 +115,17 @@ def compute_multiclass_metrics(y_true, y_prob):
     y_prob = np.asarray(y_prob, dtype=float)
     if y_prob.ndim != 2 or y_prob.shape[1] < 2:
         raise ValueError(f'expected softmax (N, C), got {y_prob.shape}')
+    row_sum = y_prob.sum(axis=1, keepdims=True)
+    if np.any(y_prob < 0):
+        shifted = y_prob - y_prob.max(axis=1, keepdims=True)
+        y_prob = np.exp(shifted)
+        y_prob = y_prob / y_prob.sum(axis=1, keepdims=True)
+        print('[warning] 3-class head returned negative values. Softmax was applied before metrics.')
+    elif not np.allclose(row_sum, 1.0, rtol=1e-5, atol=1e-6):
+        deviation = float(np.max(np.abs(row_sum - 1.0)))
+        y_prob = y_prob / np.clip(row_sum, 1e-7, None)
+        if deviation > 1e-3:
+            print(f'[warning] 3-class probabilities were renormalized. max |row sum - 1| = {deviation:.4f}')
     n_class = int(y_prob.shape[1])
     y_arr = np.asarray(y_true)
     if y_arr.ndim == 2:
@@ -129,7 +141,9 @@ def compute_multiclass_metrics(y_true, y_prob):
     recall = recall_score(y, pred, average='macro', zero_division=0, labels=labels)
     f1 = f1_score(y, pred, average='macro', zero_division=0, labels=labels)
     balanced_acc = balanced_accuracy_score(y, pred)
+    per_precision = precision_score(y, pred, average=None, zero_division=0, labels=labels)
     per_recall = recall_score(y, pred, average=None, zero_division=0, labels=labels)
+    per_f1 = f1_score(y, pred, average=None, zero_division=0, labels=labels)
     try:
         roc_auc = roc_auc_score(
             y, y_prob, multi_class='ovr', average='macro', labels=labels)
@@ -151,6 +165,18 @@ def compute_multiclass_metrics(y_true, y_prob):
         specs.append(float(tn / (tn + fp)) if (tn + fp) else 0.0)
     counts = np.bincount(y, minlength=n_class)
     confidence = y_prob.max(axis=1)
+    correct = (pred == y).astype(float)
+    ece = 0.0
+    edges = np.linspace(0.0, 1.0, 16)
+    for b in range(15):
+        lo, hi = edges[b], edges[b + 1]
+        if b == 14:
+            mask = (confidence >= lo) & (confidence <= hi)
+        else:
+            mask = (confidence >= lo) & (confidence < hi)
+        if mask.sum() == 0:
+            continue
+        ece += (mask.sum() / len(confidence)) * abs(float(confidence[mask].mean()) - float(correct[mask].mean()))
     metrics = {
         'accuracy': float(accuracy),
         'majority_acc': float(counts.max() / max(len(y), 1)),
@@ -162,14 +188,31 @@ def compute_multiclass_metrics(y_true, y_prob):
         'roc_auc': float(roc_auc),
         'pr_auc': float(pr_auc),
         'nll': float(nll),
-        'ece': float('nan'),
+        'ece': float(ece),
         'pred_mean': float(confidence.mean()),
         'pred_std': float(confidence.std()),
         'n_test_samples': int(len(y)),
         'confusion_matrix': cm.tolist(),
     }
     for i, name in enumerate(names[:n_class]):
+        positive = (y == i).astype(int)
+        column = y_prob[:, i]
+        if positive.min() != positive.max():
+            class_auc = float(roc_auc_score(positive, column))
+            class_ap = float(average_precision_score(positive, column))
+        else:
+            class_auc = float('nan')
+            class_ap = float('nan')
+        metrics[f'precision_{name}'] = float(per_precision[i])
         metrics[f'recall_{name}'] = float(per_recall[i])
+        metrics[f'specificity_{name}'] = float(specs[i])
+        metrics[f'f1_{name}'] = float(per_f1[i])
+        metrics[f'auc_{name}'] = class_auc
+        metrics[f'ap_{name}'] = class_ap
+        metrics[f'support_{name}'] = float(counts[i])
+    if save_path is not None:
+        with open(save_path, 'w', encoding='utf-8') as fid:
+            json.dump(metrics, fid, indent=2)
     return metrics
 
 CACHE_READ_WORKERS = 8

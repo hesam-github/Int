@@ -1658,7 +1658,11 @@ def load_ped_intents_pkl(saved_files_path, split_name):
     path = os.path.join(saved_files_path, f'ped_intents_{split_name}.pkl')
     with open(path, 'rb') as fid:
         ped_intents = _pickle.load(fid)
-    y_prob = [np.asarray(r).ravel()[0] for r in ped_intents['results']]
+    rows = [np.asarray(r, dtype=float).ravel() for r in ped_intents['results']]
+    if rows and rows[0].size > 1:
+        y_prob = np.stack(rows, axis=0)
+    else:
+        y_prob = [float(r[0]) for r in rows]
     y_true = ped_intents['gt']
     return y_prob, y_true
 
@@ -1711,6 +1715,38 @@ def evaluate_split_full_metrics(model, data_split, data_opts, saved_files_path,
     print(f"[{split_name}] full metrics (threshold={threshold:.2f}) saved to: {split_metrics_path}")
     for k, v in metrics.items():
         print(f"  {k}: {v}")
+    return metrics
+
+def evaluate_split_multiclass(model, data_split, data_opts, saved_files_path,
+                              paths, split_name):
+    """Best checkpoint, overlap=1, argmax over the 3-class softmax."""
+    from pie_intent_helpers import compute_multiclass_metrics
+    acc, f1 = model.test_chunk(
+        data_split, data_opts, saved_files_path, visualize=False,
+        results_suffix=f'_{split_name}', vis_num_correct=30, vis_num_incorrect=30,
+    )
+    print(f"[note] '{split_name}' uses overlap=1, not "
+          f"seq_overlap_rate={data_opts['seq_overlap_rate']}. "
+          f"Not the Diving Deeper overlap of 0.3.")
+    print(f"[{split_name}] argmax accuracy={acc:.4f}  macro_f1={f1:.4f}")
+    y_prob, y_true = load_ped_intents_pkl(saved_files_path, split_name)
+    split_metrics_path = paths['metrics_path'].replace('.json', f'_{split_name}.json')
+    metrics = compute_multiclass_metrics(y_true, y_prob, save_path=split_metrics_path)
+    print(f"[{split_name}] 3-class metrics saved to: {split_metrics_path}")
+    print(f"  accuracy={metrics['accuracy']:.4f} | majority_acc={metrics['majority_acc']:.4f} | "
+          f"balanced_acc={metrics['balanced_acc']:.4f} | auc={metrics['roc_auc']:.4f} | "
+          f"f1={metrics['f1']:.4f} | nll={metrics['nll']:.4f} | ece={metrics['ece']:.4f}")
+    for name, title in (('nci', 'no-crossing'), ('ui', 'unsure'), ('ci', 'crossing')):
+        if f'recall_{name}' not in metrics:
+            continue
+        print(f"  {title}: support={metrics[f'support_{name}']:.0f} | "
+              f"precision={metrics[f'precision_{name}']:.4f} | "
+              f"recall={metrics[f'recall_{name}']:.4f} | "
+              f"specificity={metrics[f'specificity_{name}']:.4f} | "
+              f"f1={metrics[f'f1_{name}']:.4f} | "
+              f"auc={metrics[f'auc_{name}']:.4f} | "
+              f"ap={metrics[f'ap_{name}']:.4f}")
+    print(f"  confusion_matrix={metrics['confusion_matrix']}")
     return metrics
 
 def recompute_split_metrics_at_threshold(saved_files_path, paths, split_name, threshold):

@@ -48,6 +48,7 @@ from train_helpers import (
     build_split_sequences,
     compute_pos_weight_from_train,
     evaluate_split_full_metrics,
+    evaluate_split_multiclass,
     find_best_threshold_by_f1,
     interactive_pick_pose_min_height,
     interactive_pick_use_visual,
@@ -905,10 +906,20 @@ def evaluate_run(model, data, saved, paths, history, hp):
     d_opts = data['data_opts']
 
     if 'intention_3class' in (d_opts.get('output_type') or []):
-        print('[eval] 3-class run: binary threshold, calibration and prior-correction tables are not computed.')
-        print('[eval] Per-epoch lines are the numbers for this run.')
-        print('[eval] They are not the Diving Deeper table. Observation length, overlap and the metric definition differ.')
-        return dict(metrics=None, metrics_calibrated=None, threshold=None,
+        print_phase(PHASE_FULL_EVAL)
+        print('[eval] 3-class: best model.h5, overlap=1, train val and test.')
+        print('[eval] Decision is argmax. Binary threshold and calibration are not used.')
+        print('[eval] overlap=1 is the same final pass as the binary runs. It is not Diving Deeper overlap=0.3.')
+        metrics = {}
+        for name, seq in (('train', data['train']), ('val', data['val']), ('test', data['test'])):
+            metrics[name] = evaluate_split_multiclass(
+                model, seq, d_opts, saved, paths, name)
+        print_summary_table(
+            "SUMMARY -- 3-CLASS (argmax, overlap=1)",
+            "[note] balanced_acc is macro recall. auc is macro one-vs-rest. "
+            "Per-class auc is one-vs-rest. Not Table II of Diving Deeper.",
+            metrics['train'], metrics['val'], metrics['test'])
+        return dict(metrics=metrics, metrics_calibrated=None, threshold=None,
                     metrics_prior_corrected=None, metrics_custom=None)
 
     splits = (('train', data['train']), ('val', data['val']), ('test', data['test']))

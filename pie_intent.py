@@ -1459,8 +1459,14 @@ class PIEIntent(object):
                         if os.path.exists(drive_feat_dir) else
                         f'mkdir -p "{drive_feat_dir}" && cp -r "{local_feat_dir}"/* "{drive_feat_dir}"/ 2>/dev/null')
 
-        acc = accuracy_score(test_target_data, np.round(test_results))
-        f1 = f1_score(test_target_data, np.round(test_results))
+        results_arr = np.asarray(test_results, dtype=float)
+        if results_arr.ndim == 2 and results_arr.shape[-1] > 1:
+            scored = compute_multiclass_metrics(test_target_data, results_arr)
+            acc = scored['accuracy']
+            f1 = scored['f1']
+        else:
+            acc = accuracy_score(test_target_data, np.round(test_results))
+            f1 = f1_score(test_target_data, np.round(test_results))
 
         save_results_path = os.path.join(model_path, f'ped_intents{results_suffix}.pkl')
         results = {'ped_id': ped_ids,
