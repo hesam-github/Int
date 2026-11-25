@@ -19,12 +19,12 @@ ARCHITECTURES = {
         'feature_target': 'decoder',
     },
     'branchattn': {
-        'desc': 'Branch attention. Sub-menu: static_pool, temporal_concat, or core_plus_extras',
+        'desc': 'Branch attention. Sub-menu: static_pool, temporal_concat, core_plus_extras, or gated_add. No temporal-encoder questions.',
         'fusion': 'branchattn',
         'feature_target': 'decoder',
     },
     'branchattn_temporal': {
-        'desc': 'Same sub-menu as branchattn. static_pool: temporal attention on every span including bbox. core_plus_extras: temporal attention only on extra spans, not on the core. temporal_concat: no temporal attention.',
+        'desc': 'Same four fusion choices as branchattn, including gated_add. static_pool: temporal attention on every span including bbox. core_plus_extras and gated_add: temporal attention only on extra spans, not on the core. temporal_concat: no temporal attention.',
         'fusion': 'branchattn_temporal',
         'feature_target': 'decoder',
     },

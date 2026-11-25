@@ -18,6 +18,8 @@ class AttentionLogger(tf.keras.callbacks.Callback):
         if att is None:
             if epoch == 0:
                 print("[attn] this architecture has no attention_model; logger idle")
+                print("[attn] top1 is printed only for softmax (static_pool, core_plus_extras).")
+                print("[attn] gated_add prints mean/open only when gate_stack exists.")
             return
         w = np.asarray(att.predict(self.val_dataset, verbose=0), dtype=np.float64)
         if w.ndim == 1:
@@ -38,14 +40,21 @@ class AttentionLogger(tf.keras.callbacks.Callback):
         row_sum = float(w.sum(1).mean())
         if kind == "gate" or abs(row_sum - 1.0) > 0.15:
             open_share = (w > 0.5).mean(0)
-            rec = {"epoch": epoch + 1, "names": names, "mean": mean.tolist(),
-                   "open_share": open_share.tolist(), "kind": "gate"}
+            rec = {"epoch": epoch + 1,
+                   "names": ["core_bbox_visual"] + list(names),
+                   "mean": [1.0] + mean.tolist(),
+                   "open_share": [1.0] + open_share.tolist(),
+                   "kind": "gate"}
             self.records.append(rec)
             print(f"epoch {epoch + 1}  residual gates")
-            parts = [f"{n}: mean={mean[i]:.3f} open={open_share[i]:.3f}"
-                     for i, n in enumerate(names)]
+            parts = ["core_bbox_visual: weight=1.000"]
+            parts += [f"{n}: mean={mean[i]:.3f} open={open_share[i]:.3f}"
+                      for i, n in enumerate(names)]
             print("  " + " | ".join(parts))
-            print("  core_bbox_visual is not in this line: it is always added, weight=1")
+            if epoch == 0:
+                print("  mean = average learned sigmoid. That is the residual coefficient.")
+                print("  open = fraction of val windows with gate > 0.5. open is not top1.")
+                print("  core weight is fixed at 1. It is not a softmax weight and not a gate.")
         else:
             entropy = float((-(w * np.log(w + 1e-12)).sum(1) / np.log(max(k, 2))).mean())
             top = np.bincount(w.argmax(1), minlength=k) / max(len(w), 1)
@@ -73,9 +82,12 @@ if __name__ == "__main__":
     with open(os.path.join(run, "epoch_metrics.json"), encoding="utf-8") as fid:
         em = {r["epoch"]: r for r in json.load(fid)}
     names = att[0]["names"]
-    print(f"{'epoch':>5} " + " ".join(f"{n[:9]:>9}" for n in names)
-          + f" {'entropy':>7} {'train_loss':>9} {'val_loss':>9} {'val_auc':>9}")
+    print(f"{'epoch':>5} " + " ".join(f"{n[:12]:>12}" for n in names)
+          + f" {'kind':>8} {'train_loss':>9} {'val_loss':>9} {'val_auc':>9}")
     for r in att:
         m = em.get(r["epoch"], {})
-        print(f"{r['epoch']:>5} " + " ".join(f"{w:>9.3f}" for w in r["mean"]) + f" {r['entropy']:>7.3f}"
-              + _f(m.get("train_loss")) + _f(m.get("val_loss")) + _f(m.get("val_roc_auc")))
+        kind = r.get("kind", "softmax")
+        mark = f"{r['entropy']:8.3f}" if "entropy" in r else f"{'gate':>8}"
+        print(f"{r['epoch']:>5} " + " ".join(f"{w:12.3f}" for w in r["mean"]) + f" {mark}"
+              + _f(m.get("train_loss")) + _f(m.get("val_loss")) + _f(m.get("val_roc_auc"))
+              + f"  {kind}")
