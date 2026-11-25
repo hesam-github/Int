@@ -518,10 +518,12 @@ class PIEIntent(object):
                   'decoder_input': decoder_input,
                   'output': output}
         if getattr(self, 'flow_representation', 'summary') == 'dense':
+            import hashlib
             from flow_dense import ensure_flow_volume
-            tag = 'fit' if fit_extra_norm else 'eval'
+            stamp = hashlib.md5(repr((images[0][0], images[-1][-1], len(images))).encode()).hexdigest()[:12]
+            tag = 'train' if fit_extra_norm else 'eval'
             cache = os.path.join(self.flow_root, 'summary', 'dense32',
-                                 f'{tag}_{len(images)}_{seq_length}.npy')
+                                 f'{tag}_{stamp}_{seq_length}.npy')
             packed['flow'] = ensure_flow_volume(images, ped_ids, self.flow_root, cache)
         return packed
 
@@ -560,10 +562,12 @@ class PIEIntent(object):
         output = output[:, 0]
         arrays = [test_img, decoder_input]
         if getattr(self, 'flow_representation', 'summary') == 'dense':
+            import hashlib
             from flow_dense import ensure_flow_volume
+            stamp = hashlib.md5(repr((images[0][0], images[-1][-1], len(images))).encode()).hexdigest()[:12]
             cache = os.path.join(
                 self.flow_root, 'summary', 'dense32',
-                f'{data_subset}_{len(images)}_{seq_length}_{overlap}.npy')
+                f'{data_subset}_{stamp}_{seq_length}_{overlap}.npy')
             arrays.append(np.asarray(
                 ensure_flow_volume(images, ped_ids, self.flow_root, cache), np.float32))
         return (arrays, output)
@@ -859,11 +863,11 @@ class PIEIntent(object):
 
                 val_dataset = self._dataset_from_memmap(
                     val_mmap, val_d['decoder_input'], val_d['output'],
-                    batch_size, shuffle=False, repeat=True, flow=train_d.get('flow'))
-                
+                    batch_size, shuffle=False, repeat=True, flow=val_d.get('flow'))
+
                 val_eval_dataset = self._dataset_from_memmap(
                     val_mmap, val_d['decoder_input'], val_d['output'],
-                    batch_size, shuffle=False, repeat=False, flow=train_d.get('flow'))
+                    batch_size, shuffle=False, repeat=False, flow=val_d.get('flow'))
 
                 train_steps = (train_mmap.shape[0] + batch_size - 1) // batch_size
                 val_steps = (val_mmap.shape[0] + batch_size - 1) // batch_size
