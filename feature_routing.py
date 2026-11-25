@@ -283,6 +283,7 @@ def restore_routing(model, hyperparams):
     model.extra_norm_stats = hyperparams.get('extra_norm_stats')
     model.feature_norm = hyperparams.get('feature_norm')
     model.use_visual = hyperparams.get('use_visual', True)
+    model.backbone_name = hyperparams.get('backbone', 'vgg16')
     model.capacity = hyperparams.get('capacity')
     model.visual_norm = hyperparams.get('visual_norm')
     model.percentile_scale = hyperparams.get('percentile_scale')

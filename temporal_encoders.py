@@ -26,6 +26,7 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 from tensorflow.keras.regularizers import l2
 
+from tensorflow.keras.layers import TimeDistributed, Conv2D
 
 def _l2(value):
     return l2(value) if value else None
@@ -707,8 +708,14 @@ def build_pie_temporal_model(encoder_name,
     print("[temporal] padding stays SAME for convlstm2d and convfact_*. "
           "feature_routing pie stays VALID. Do not compare their AUC as the same ConvLSTM.")
 
+    visual_in = encoder_in
+    if int(vgg_shape[-1]) != 512:
+        visual_in = TimeDistributed(
+            Conv2D(512, 1, name='backbone_to_512'),
+            name='backbone_project')(encoder_in)
+        print(f"[temporal] 1x1 projection {int(vgg_shape[-1])} -> 512 before the temporal block")
     context = build_visual_context(
-        encoder_name, encoder_in, vgg_shape=vgg_shape, d_model=d_model,
+        encoder_name, visual_in, vgg_shape=vgg_shape, d_model=d_model,
         convlstm_filters=convlstm_filters, convlstm_kernel=convlstm_kernel,
         n_state=n_state, num_heads=num_heads, num_layers=num_layers, ff_mult=ff_mult,
         mimo_rank=mimo_rank, dropout=dropout, recurrent_dropout=recurrent_dropout,

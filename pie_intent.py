@@ -548,7 +548,7 @@ class PIEIntent(object):
                                                 data_type=data_subset,
                                                 save_path=self.get_path(type_save='data',
                                                                         data_type='features_context_pad_resize',
-                                                                        model_name=FEATURE_CACHE_NAME,
+                                                                        model_name=self._feature_cache_name(),
                                                                         data_subset=data_subset))
         output = output[:, 0]
         return ([test_img, decoder_input], output)
@@ -581,6 +581,11 @@ class PIEIntent(object):
         """pie: ConvLSTM + one decoder LSTM. pcpa: one branch per stream."""
         if getattr(self, 'temporal_encoder', None):
             from temporal_encoders import build_from_run_opts
+            if getattr(self, 'use_visual', True):
+                self._ensure_context_model()
+                vgg_shape = tuple(int(d) for d in self.context_model.output_shape[1:])
+            else:
+                vgg_shape = (7, 7, 512)
             self.train_model = build_from_run_opts(
                 {'temporal_encoder': self.temporal_encoder,
                  'temporal_hp': getattr(self, 'temporal_hp', {}),
@@ -596,6 +601,7 @@ class PIEIntent(object):
                 recurrent_dropout=self._lstm_recurrent_dropout,
                 recurrent_activation=self._lstm_recurrent_activation,
                 l2_value=self.reg_value,
+                vgg_shape=vgg_shape,
             )
             self.train_model.summary()
             print(f"[arch] BUILT via temporal_encoders: encoder={self.temporal_encoder} "
@@ -790,7 +796,7 @@ class PIEIntent(object):
 
                 save_root = dict(type_save='data',
                                  data_type='features' + '_' + data_opts['crop_type'] + '_' + data_opts['crop_mode'],
-                                 model_name=FEATURE_CACHE_NAME)
+                                 model_name=self._feature_cache_name())
                 train_save_path = self.get_path(data_subset='train', **save_root)
                 val_save_path = self.get_path(data_subset='val', **save_root)
 
@@ -952,6 +958,7 @@ class PIEIntent(object):
                 'temporal_encoder': getattr(self, 'temporal_encoder', None),
                 'temporal_hp': getattr(self, 'temporal_hp', None),
                 'use_visual': getattr(self, 'use_visual', True),
+                'backbone': getattr(self, 'backbone_name', 'vgg16'),
                 'capacity': getattr(self, 'capacity', None),
                 'visual_norm': getattr(self, 'visual_norm', None),
                 'percentile_scale': getattr(self, 'percentile_scale', None),
@@ -1134,13 +1141,13 @@ class PIEIntent(object):
                             ("pmean", m["pred_mean"]),
                             ("pstd", m["pred_std"]),
                         ]
+                        print(f"  {title}")
+                        print(" | ".join(f"{n}={v:.4f}" for n, v in row1))
+                        print(" | ".join(f"{n}={v:.4f}" for n, v in row2))
                         extra = [(n, m[n]) for n in ('recall_nci', 'recall_ui', 'recall_ci') if n in m]
                         if extra:
                             print(" | ".join(f"{n}={v:.4f}" for n, v in extra))
                             print("  3-class: auc=macro one-vs-rest, balanced_acc=macro recall. Not binary.")
-                        print(f"  {title}")
-                        print(" | ".join(f"{n}={v:.4f}" for n, v in row1))
-                        print(" | ".join(f"{n}={v:.4f}" for n, v in row2))
 
                     def _print_epoch_report(epoch, train_parts, val_parts, test_parts,
                                             suffix, train_m, val_m, test_m, head_auc):
@@ -1379,7 +1386,7 @@ class PIEIntent(object):
 
             local_feat_dir = self.get_path(type_save='data',
                                         data_type='features_context_pad_resize',
-                                        model_name=FEATURE_CACHE_NAME,
+                                        model_name=self._feature_cache_name(),
                                         data_subset=data_subset)
             drive_feat_dir = os.path.join(checkpoint_dir, f"{self._backbone_token}_feature_cache")
             if os.path.exists(drive_feat_dir):

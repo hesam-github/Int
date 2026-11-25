@@ -741,7 +741,8 @@ def start_run(opts, hp, data, ident, pie_path):
         ('feature_norm', opts.get('feature_norm')),
         ('zero_visual', opts.get('zero_visual', False))])
 
-    write_run_summary(        ('features and settings (not in the folder name)', [
+    write_run_summary(paths['run_dir'], ident['full_tag'], [
+        ('features and settings (not in the folder name)', [
             ('decoder_features', ident['decoder_features']),
             ('task', opts.get('task')),
             ('paper_protocol', opts.get('paper_protocol')),
@@ -753,7 +754,6 @@ def start_run(opts, hp, data, ident, pie_path):
             ('backbone', opts.get('backbone')),
             ('branch_mode', opts.get('branch_mode')),
         ]),
-        paths['run_dir'], ident['full_tag'], [
         ('run identity', [
             ('architecture', ident['architecture']),
             ('run_name (folder)', paths['run_folder_name']),
@@ -764,7 +764,7 @@ def start_run(opts, hp, data, ident, pie_path):
             ('use_visual', opts.get('use_visual')),
             ('visual_norm', opts.get('visual_norm')),
             ('visual_pipeline', visual_experiment_code(
-            opts.get('visual_norm'), (opts.get('capacity') or {}).get('log1p'))),
+                opts.get('visual_norm'), (opts.get('capacity') or {}).get('log1p'))),
             ('decoder_features', ident['decoder_features']),
             ('temporal_encoder', opts.get('temporal_encoder')),
             ('temporal_hp', opts.get('temporal_hp')),
