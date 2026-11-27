@@ -277,9 +277,14 @@ def stop_gpu_watchdog():
 
 
 def _windowed_frame_generator(model, images, bboxes, ped_ids, decoder_input,
-                              output, save_path, batch_size, data_type_label, shuffle):
-    """Yields one preprocessed (encoder_input, decoder_input, label)
-    mini-batch at a time, instead of materializing the full split."""
+                              output, save_path, batch_size, data_type_label, shuffle,
+                              flow=None):
+    """Yields one preprocessed mini-batch.
+
+    flow is None: (encoder, decoder, label).
+    flow is set: (encoder, decoder, flow, label). Flow rows use the same
+    index as the image windows.
+    """
     n = len(images)
     order = np.random.permutation(n) if shuffle else np.arange(n)
     GC_EVERY_N_BATCHES = 20
@@ -304,7 +309,13 @@ def _windowed_frame_generator(model, images, bboxes, ped_ids, decoder_input,
         assert batch_output.ndim == 2 and batch_output.shape[1] in (1, 3), (
             f"Expected batch_output shape (batch, 1) or (batch, 3), got {batch_output.shape}.")
 
-        yield batch_features.astype(np.float32, copy=False), batch_decoder, batch_output
+        if flow is None:
+            yield (batch_features.astype(np.float32, copy=False),
+                   batch_decoder, batch_output)
+        else:
+            batch_flow = np.asarray(flow[idx], dtype=np.float32)
+            yield (batch_features.astype(np.float32, copy=False),
+                   batch_decoder, batch_flow, batch_output)
 
         batch_count += 1
         if batch_count % GC_EVERY_N_BATCHES == 0:
@@ -314,23 +325,40 @@ def _windowed_frame_generator(model, images, bboxes, ped_ids, decoder_input,
 def build_generator_dataset(model, images, bboxes, ped_ids, decoder_input,
                             output, save_path, seq_length, feature_shape,
                             batch_size, data_type_label, shuffle,
-                            private_threadpool_size=4, prefetch_size=1):
-    """Wraps _windowed_frame_generator in a tf.data.Dataset with a
-    restricted internal threadpool, so it can be passed to model.fit()
-    or model.predict()."""
-    def gen():
-        for feat_batch, dec_batch, y_batch in _windowed_frame_generator(
-                model, images, bboxes, ped_ids, decoder_input, output,
-                save_path, batch_size, data_type_label, shuffle):
-            yield (feat_batch, dec_batch), y_batch
+                            private_threadpool_size=4, prefetch_size=1,
+                            flow=None):
+    """tf.data wrapper. flow=None keeps the two-input dataset."""
+    if flow is None:
+        def gen():
+            for feat_batch, dec_batch, y_batch in _windowed_frame_generator(
+                    model, images, bboxes, ped_ids, decoder_input, output,
+                    save_path, batch_size, data_type_label, shuffle):
+                yield (feat_batch, dec_batch), y_batch
 
-    output_signature = (
-        (
-            tf.TensorSpec(shape=(None, seq_length) + feature_shape, dtype=tf.float32),
-            tf.TensorSpec(shape=(None, decoder_input.shape[1], decoder_input.shape[2]), dtype=tf.float32),
-        ),
-        tf.TensorSpec(shape=(None, int(np.shape(output)[-1])), dtype=tf.float32),
-    )
+        output_signature = (
+            (
+                tf.TensorSpec(shape=(None, seq_length) + feature_shape, dtype=tf.float32),
+                tf.TensorSpec(shape=(None, decoder_input.shape[1], decoder_input.shape[2]), dtype=tf.float32),
+            ),
+            tf.TensorSpec(shape=(None, int(np.shape(output)[-1])), dtype=tf.float32),
+        )
+    else:
+        flow_tail = tuple(np.shape(flow)[1:])
+
+        def gen():
+            for feat_batch, dec_batch, flow_batch, y_batch in _windowed_frame_generator(
+                    model, images, bboxes, ped_ids, decoder_input, output,
+                    save_path, batch_size, data_type_label, shuffle, flow=flow):
+                yield (feat_batch, dec_batch, flow_batch), y_batch
+
+        output_signature = (
+            (
+                tf.TensorSpec(shape=(None, seq_length) + feature_shape, dtype=tf.float32),
+                tf.TensorSpec(shape=(None, decoder_input.shape[1], decoder_input.shape[2]), dtype=tf.float32),
+                tf.TensorSpec(shape=(None,) + flow_tail, dtype=tf.float32),
+            ),
+            tf.TensorSpec(shape=(None, int(np.shape(output)[-1])), dtype=tf.float32),
+        )
 
     ds = tf.data.Dataset.from_generator(gen, output_signature=output_signature)
 
@@ -340,7 +368,6 @@ def build_generator_dataset(model, images, bboxes, ped_ids, decoder_input,
     ds = ds.with_options(options)
     ds = ds.prefetch(prefetch_size)
     return ds
-
 
 def save_visualizations(vis_results, model_path, results_suffix,
                         num_correct=10, num_incorrect=10, seed=42):

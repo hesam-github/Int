@@ -77,6 +77,25 @@ class PIEIntentExperiment(PIEIntent):
             decoder_input = apply_feature_norms(self, decoder_input, self.feature_spans, fit=False)
         output = output[:, 0]
 
+        flow = None
+        if getattr(self, 'flow_representation', 'summary') == 'dense':
+            import hashlib
+            from flow_dense import ensure_flow_volume
+            if not getattr(self, 'flow_root', None):
+                raise RuntimeError(
+                    'flow_representation is dense but flow_root was not restored '
+                    'from hyperparams.json.')
+            stamp = hashlib.md5(
+                repr((images_chunk[0][0], images_chunk[-1][-1], len(images_chunk))).encode()
+            ).hexdigest()[:12]
+            cache = os.path.join(
+                self.flow_root, 'summary', 'dense32',
+                f'{data_subset}_{stamp}_{self._sequence_length}_{overlap}.npy')
+            flow = ensure_flow_volume(
+                images_chunk, ped_ids_chunk, self.flow_root, cache)
+            print(f'[flow dense] eval windows={len(images_chunk)} '
+                  f'overlap={overlap} subset={data_subset}')
+
         if getattr(self, 'use_visual', True):
             if not hasattr(self, 'context_model') or self.context_model is None:
                 self.context_model = vgg16.VGG16(input_shape=(224, 224, 3),
@@ -86,14 +105,18 @@ class PIEIntentExperiment(PIEIntent):
                                       data_type='features_context_pad_resize',
                                       model_name=FEATURE_CACHE_NAME,
                                       data_subset=data_subset)
-            # shuffle=False: the test order must stay deterministic.
             test_dataset = build_generator_dataset(
                 self, images_chunk, bboxes_chunk, ped_ids_chunk,
                 decoder_input, output, save_path,
                 self._sequence_length, feature_shape,
                 batch_size=train_params['batch_size'],
-                data_type_label=data_subset, shuffle=False)
+                data_type_label=data_subset, shuffle=False,
+                flow=flow)
         else:
+            if flow is not None:
+                raise RuntimeError(
+                    'dense flow is a third model input. decoder-only evaluation '
+                    'cannot feed it.')
             test_dataset = decoder_only_dataset(
                 decoder_input, output, train_params['batch_size'],
                 shuffle=False, repeat=False)

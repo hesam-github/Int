@@ -877,7 +877,8 @@ class PIEIntent(object):
                         self, test_d['images'], test_d['bboxes'], test_d['ped_ids'],
                         test_d['decoder_input'], test_d['output'], test_save_path,
                         seq_length, feature_shape, batch_size=batch_size,
-                        data_type_label='test', shuffle=False)
+                        data_type_label='test', shuffle=False,
+                        flow=test_d.get('flow'))
             else:
                 print("[visual] use_visual=False: VGG16 not loaded, decoder-only input")
                 train_dataset = decoder_only_dataset(train_d['decoder_input'], train_d['output'],
