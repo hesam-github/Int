@@ -494,13 +494,11 @@ def build_intention_model(intent):
             flow_in = Input(
                 shape=(intent._decoder_seq_length, 32, 32, 2),
                 name='flow_input')
-            flow_seq = TimeDistributed(
-                GlobalAveragePooling2D(), name='flow_gap')(
-                ConvLSTM2D(
-                    filters=16, kernel_size=3, padding='same',
-                    return_sequences=True, name='flow_convlstm')(flow_in))
-            print('[flow dense] input (15, 32, 32, 2) -> ConvLSTM 16 -> GAP -> branch flow_dense')
-
+            flow_seq = TimeDistributed(GlobalAveragePooling2D(), name='flow_gap')(
+                TimeDistributed(
+                    Conv2D(16, 3, padding='same', activation='relu'),
+                    name='flow_conv_time')(flow_in))
+            print('[flow dense] input (15, 32, 32, 2) -> Conv2D 16 per frame -> GAP -> (15, 16) -> branch flow_dense')
         if mode == 'static_pool':
             vis_h = Dense(units, activation='tanh', name='vis_proj',
                           kernel_regularizer=intent._kernel_regularizer)(visual)

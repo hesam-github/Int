@@ -568,8 +568,7 @@ class PIEIntent(object):
             cache = os.path.join(
                 self.flow_root, 'summary', 'dense32',
                 f'{data_subset}_{stamp}_{seq_length}_{overlap}.npy')
-            arrays.append(np.asarray(
-                ensure_flow_volume(images, ped_ids, self.flow_root, cache), np.float32))
+            arrays.append(ensure_flow_volume(images, ped_ids, self.flow_root, cache))
         return (arrays, output)
 
     def get_model(self, model):
@@ -1455,7 +1454,7 @@ class PIEIntent(object):
                     'decoder_input': test_data_chunk[1],
                 }
                 if len(test_data_chunk) == 3:
-                    predict_inputs['flow_input'] = test_data_chunk[2]
+                    predict_inputs['flow_input'] = np.asarray(test_data_chunk[2], np.float32)
                 predict_dataset = tf.data.Dataset.from_tensor_slices(predict_inputs).batch(32)
 
             test_results_chunk = test_model.predict(predict_dataset, verbose=1)

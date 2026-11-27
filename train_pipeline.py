@@ -183,16 +183,18 @@ def pick_run_options(hp):
         print("[visual_pipeline] re-asking visual_norm and capacity.")
 
     opts['log_mode'] = interactive_pick_log_mode()
-    print(f"[config] LOG_MODE = {opts['log_mode']}")
-
-    opts['balance_mode'] = interactive_pick_balance_mode()
     opts['flow_representation'] = 'summary'
     if 'flow' in opts['offline'] and opts['balance_mode'] != 'augmentation':
         opts['flow_representation'] = interactive_pick_flow_representation(
             opts['architecture'], opts.get('branch_mode'))
     elif 'flow' in opts['offline']:
         print('[flow] augmentation mode cannot use dense flow. Representation stays summary, and summaries are still skipped.')
+    if opts.get('flow_representation') == 'dense' and int(opts['batch_size']) > 32:
+        print(f"[flow dense] batch {opts['batch_size']} does not fit beside the VGG ConvLSTM.")
+        print("[flow dense] training batch is 32. Gradient noise changes. The samples do not.")
+        opts['batch_size'] = 32
     print(f"[config] BALANCE_MODE = {opts['balance_mode']}")
+    print(f"[config] BATCH_SIZE = {opts['batch_size']}")
     opts['val_augment_mode'] = (interactive_pick_val_augment_mode()
                                 if opts['balance_mode'] == 'augmentation' else None)
     if opts['val_augment_mode']:

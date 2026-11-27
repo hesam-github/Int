@@ -50,6 +50,8 @@ def ensure_flow_volume(images, ped_ids, flow_root, cache_path):
             return cached
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     tmp = cache_path + '.tmp.npy'
+    if os.path.isfile(tmp):
+        os.remove(tmp)
     mm = np.lib.format.open_memmap(tmp, mode='w+', dtype=np.float16, shape=shape)
     missing = 0
     total = n * t
@@ -60,6 +62,10 @@ def ensure_flow_volume(images, ped_ids, flow_root, cache_path):
             mm[i, j] = frame.astype(np.float16)
             missing += int(not ok)
     mm.flush()
+    underlying = getattr(mm, '_mmap', None)
+    if underlying is not None:
+        underlying.close()
+    del mm
     os.replace(tmp, cache_path)
     print(f'[flow dense] wrote {cache_path}')
     print(f'[flow dense] missing frames {missing}/{total} ({100.0 * missing / max(total, 1):.1f}%)')
