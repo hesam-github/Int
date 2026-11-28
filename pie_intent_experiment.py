@@ -236,8 +236,16 @@ class PIEIntentExperiment(PIEIntent):
             del data_test_chunk, sub_results
             gc.collect()
 
-        acc = accuracy_score(test_target_data, np.round(test_results))
-        f1 = f1_score(test_target_data, np.round(test_results))
+        y_true = np.asarray(test_target_data)
+        y_prob = np.asarray(test_results)
+        if y_true.ndim == 2 and y_true.shape[1] > 1:
+            true_id = y_true.argmax(axis=1)
+            pred_id = y_prob.argmax(axis=1)
+            acc = accuracy_score(true_id, pred_id)
+            f1 = f1_score(true_id, pred_id, average='macro', zero_division=0)
+        else:
+            acc = accuracy_score(y_true, np.round(y_prob))
+            f1 = f1_score(y_true, np.round(y_prob))
 
         save_results_path = os.path.join(model_path, f'ped_intents{results_suffix}.pkl')
         results = {'ped_id': ped_ids,

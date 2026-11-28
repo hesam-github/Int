@@ -1,4 +1,5 @@
-"""One 3-class intention run. Answers the training menus and then calls the unchanged pipeline.
+"""One 3-class intention run. Answers the training menus, calls the unchanged pipeline,
+then prints a full metric report for train/val/test from the saved predictions.
 
 Branches are the four used by the binary run whose test ROC-AUC was 0.813
 (pose_critical, scene_critical, light_color, flow_critical).
@@ -9,7 +10,10 @@ uses categorical cross-entropy.
 """
 import builtins
 import os
+import pickle
 import sys
+
+import numpy as np
 
 PIE_PATH = r'D:\PIE codes\PIE_dataset'
 os.environ['PIE_PATH'] = PIE_PATH
@@ -48,6 +52,8 @@ DATA_OPTS = {
 }
 
 FEATURES = ['bbox', 'pose_critical', 'scene_critical', 'light_color', 'flow_critical']
+LEAKAGE_PRONE = ('light_color', 'flow_critical')
+CLASS_NAMES = ('nci', 'ui', 'ci')
 _LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'train_3class_answers.txt')
 
 
@@ -78,8 +84,6 @@ def decide(text):
     if '[visual_norm]' in text:
         return 'n'
     if '[visual_percentile]' in text:
-        return 'n'
-    if '[capacity] add log1p' in text:
         return 'n'
     if '[capacity] add log1p' in text:
         return 'n'
@@ -176,6 +180,101 @@ def _install_overlap():
     pie_intent_experiment.PIEIntentExperiment.test_chunk = _chunk
 
 
+# ---------------------------------------------------------------- full report
+def _normalize(prob):
+    prob = np.asarray(prob, dtype=float)
+    if np.any(prob < 0):
+        prob = np.exp(prob - prob.max(axis=1, keepdims=True))
+    return prob / np.clip(prob.sum(axis=1, keepdims=True), 1e-7, None)
+
+
+def _ped_keys(res):
+    """One pedestrian id per window (last frame). None if the pkl layout is unexpected."""
+    try:
+        return np.array([str(np.asarray(p, dtype=object).ravel()[-1]) for p in res['ped_id']])
+    except Exception:
+        return None
+
+
+def _bootstrap(y, prob, keys, n_boot, seed=0):
+    from sklearn.metrics import roc_auc_score, balanced_accuracy_score
+    rng = np.random.default_rng(seed)
+    uniq = np.unique(keys)
+    groups = {k: np.flatnonzero(keys == k) for k in uniq}
+    draws = {'roc_auc': [], 'balanced_acc': [], 'accuracy': []}
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[k] for k in rng.choice(uniq, size=len(uniq), replace=True)])
+        yy, pp = y[idx], prob[idx]
+        if len(np.unique(yy)) < 3:
+            continue
+        pred = pp.argmax(axis=1)
+        draws['roc_auc'].append(roc_auc_score(yy, pp, multi_class='ovr', average='macro', labels=[0, 1, 2]))
+        draws['balanced_acc'].append(balanced_accuracy_score(yy, pred))
+        draws['accuracy'].append(float((pred == yy).mean()))
+    return {k: (float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5)), len(v))
+            for k, v in draws.items() if v}, len(uniq)
+
+
+def report_from_pkl(run_dir, split, overlap, n_boot=1000):
+    """Reads ped_intents_<split>.pkl (written by test_chunk), prints and saves every metric."""
+    from pie_intent_helpers import compute_multiclass_metrics
+    with open(os.path.join(run_dir, f'ped_intents_{split}.pkl'), 'rb') as fid:
+        res = pickle.load(fid)
+    y_true = np.asarray(res['gt'])
+    y_prob = np.asarray(res['results'], dtype=float)
+    m = compute_multiclass_metrics(
+        y_true, y_prob, save_path=os.path.join(run_dir, f'metrics_{split}_3class_eval.json'))
+    y = y_true.argmax(axis=1) if y_true.ndim == 2 else y_true.astype(int).ravel()
+    prob = _normalize(y_prob)
+    cm = np.asarray(m['confusion_matrix'])
+    n = m['n_test_samples']
+
+    leaky = [f for f in FEATURES if f in LEAKAGE_PRONE]
+    lines = [f'=== 3-class report | split={split} | n={n} | overlap={overlap} ===',
+             f'run dir: {run_dir}',
+             f'decoder features: {FEATURES}',
+             f'leakage-prone inputs present: {leaky} -> report as a labelled leakage-prone configuration' if leaky
+             else 'leakage-prone inputs present: none',
+             '', '--- overall (argmax decision) ---']
+    for key in ('accuracy', 'majority_acc', 'balanced_acc', 'precision', 'recall', 'specificity',
+                'f1', 'roc_auc', 'pr_auc', 'nll', 'ece', 'pred_mean', 'pred_std'):
+        lines.append(f'{key:<14}{m[key]:.4f}')
+    lines.append(f"{'acc-majority':<14}{m['accuracy'] - m['majority_acc']:+.4f}")
+
+    lines += ['', '--- per class (one-vs-rest) ---',
+              f"{'class':<6}{'support':>9}{'prec':>8}{'recall':>8}{'spec':>8}{'f1':>8}{'auc':>8}{'ap':>8}"]
+    for c in CLASS_NAMES:
+        lines.append(f"{c:<6}{int(m['support_' + c]):>9}{m['precision_' + c]:>8.4f}{m['recall_' + c]:>8.4f}"
+                     f"{m['specificity_' + c]:>8.4f}{m['f1_' + c]:>8.4f}{m['auc_' + c]:>8.4f}{m['ap_' + c]:>8.4f}")
+
+    lines += ['', '--- confusion matrix (rows = true, cols = predicted) ---',
+              f"{'':<6}" + ''.join(f'{c:>8}' for c in CLASS_NAMES) + '   row % (nci ui ci)']
+    for i, c in enumerate(CLASS_NAMES):
+        pct = ' '.join(f'{100 * v / max(cm[i].sum(), 1):5.1f}' for v in cm[i])
+        lines.append(f'{c:<6}' + ''.join(f'{v:>8}' for v in cm[i]) + f'   {pct}')
+    share = cm.sum(axis=0) / cm.sum()
+    lines.append('predicted share: ' + ' '.join(f'{c}={s:.4f}' for c, s in zip(CLASS_NAMES, share)))
+
+    keys = _ped_keys(res)
+    if n_boot and keys is not None:
+        ci, n_ped = _bootstrap(y, prob, keys, n_boot)
+        lines += ['', f'--- 95% CI, bootstrap over pedestrians ({n_ped} ids, {n_boot} draws) ---']
+        for k, (lo, hi, used) in ci.items():
+            lines.append(f'{k:<14}[{lo:.4f}, {hi:.4f}]  valid draws={used}')
+    elif n_boot:
+        lines += ['', '[note] pedestrian ids not readable from the pkl: bootstrap skipped.']
+
+    if split == 'test' and n != 6472:
+        lines.append('[warning] test n != 6472: not comparable with Diving Deeper Table II.')
+    lines.append('[note] single seed, single split: AUC gaps of a few hundredths are not evidence of superiority.')
+
+    text = '\n'.join(lines)
+    print('\n' + text)
+    with open(os.path.join(run_dir, f'full_report_{split}_3class.txt'), 'w', encoding='utf-8') as fid:
+        fid.write(text + '\n')
+    return m
+
+
 def main():
     if os.path.exists(_LOG):
         os.remove(_LOG)
@@ -183,7 +282,10 @@ def main():
     _install_feature_pick()
     _install_overlap()
     from train_pipeline import run_training_pipeline
-    run_training_pipeline(HP, DATA_OPTS, PIE_PATH)
+    out = run_training_pipeline(HP, DATA_OPTS, PIE_PATH)
+    overlap = 0.3 if out['opts'].get('paper_protocol') else DATA_OPTS['seq_overlap_rate']
+    for split in ('train', 'val', 'test'):
+        report_from_pkl(out['saved_files_path'], split, overlap, n_boot=0 if split == 'train' else 1000)
 
 
 if __name__ == '__main__':
