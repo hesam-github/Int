@@ -566,10 +566,12 @@ def prepare_data(opts, data_opts, pie_path):
         print(f"[c3 loss] train-track counts nci={counts[0]:.0f} ui={counts[1]:.0f} ci={counts[2]:.0f}")
         print(f"[c3 loss] gamma={gamma} focal_weight={focal_weight} ui_push={ui_push}")
         print(f"[c3 loss] final weights nci={weights[0]:.3f} ui={weights[1]:.3f} ci={weights[2]:.3f}")
-        print('[c3 loss] UI is not rarer than NCI. Inverse-frequency alone will not create a third mode.')
+        if counts[1] >= counts[0]:
+            print('[c3 loss] UI is not rarer than NCI at track level. Inverse-frequency alone will not create a third mode.')
         loss_fn = class_balanced_categorical_focal(
             weights, gamma=gamma, focal_weight=focal_weight)
         loss_name = loss_fn.__name__
+        pos_weight = None
     else:
         pos_weight = None
         loss_name = opts['loss_name']
