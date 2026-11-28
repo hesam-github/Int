@@ -212,9 +212,26 @@ def pick_run_options(hp):
     opts['task'] = '3class' if task_raw == '1' else 'binary'
     print(f"[config] TASK = {opts['task']}")
     if opts['task'] == '3class':
-        opts['loss_name'] = 'categorical_crossentropy'
-        opts['loss_fn'] = 'categorical_crossentropy'
-        print('[config] LOSS_FUNCTION (family) = categorical_crossentropy')
+        print('--- 3-class loss ---')
+        print('  [0] categorical_crossentropy')
+        print('  [1] weighted CE + focal. Weights from train tracks, mean 1.  <-- suggested')
+        print('      gamma=1.0, focal_weight=1.0')
+        print('  [2] same loss, then multiply the UI weight by 3 and set the mean back to 1.')
+        print('      This is a push. Accuracy can fall. Keep the run only if macro F1 rises.')
+        loss_raw = input('Select [0/1/2] (default 1): ').strip()
+        if loss_raw == '0':
+            opts['loss_name'] = 'categorical_crossentropy'
+            opts['loss_fn'] = 'categorical_crossentropy'
+            opts['ui_push'] = False
+        elif loss_raw == '2':
+            opts['loss_name'] = 'c3_weighted_focal'
+            opts['loss_fn'] = None
+            opts['ui_push'] = True
+        else:
+            opts['loss_name'] = 'c3_weighted_focal'
+            opts['loss_fn'] = None
+            opts['ui_push'] = False
+        print(f"[config] LOSS_FUNCTION (family) = {opts['loss_name']} ui_push={opts['ui_push']}")
         print('[warning] val_auc for this task is macro one-vs-rest, not binary ROC-AUC.')
         print('[protocol] Diving Deeper samples PIE intention with obs=15 and overlap=0.3.')
         print('           Their test set is 6472 windows. Your DATA_OPTS overlap is not that protocol.')
@@ -502,6 +519,29 @@ def prepare_data(opts, data_opts, pie_path):
             focal_weight=focal_weight,
             pos_weight=pos_weight)
         loss_name = loss_fn.__name__
+
+    elif opts.get('loss_name') == 'c3_weighted_focal':
+        from focal_loss import class_balanced_categorical_focal
+        counts = np.zeros(3, dtype=np.float64)
+        for track in train['intention_3class']:
+            arr = np.asarray(track, dtype=np.float64)
+            counts[int(np.argmax(arr[-1] if arr.ndim == 2 else arr))] += 1.0
+        counts = np.maximum(counts, 1.0)
+        weights = counts.sum() / counts
+        weights = weights / weights.mean()
+        if opts.get('ui_push'):
+            weights = weights * np.array([1.0, 3.0, 1.0], dtype=np.float64)
+            weights = weights / weights.mean()
+        gamma = 1.0
+        focal_weight = 1.0
+        print(f"[c3 loss] train-track counts nci={counts[0]:.0f} ui={counts[1]:.0f} ci={counts[2]:.0f}")
+        print(f"[c3 loss] gamma={gamma} focal_weight={focal_weight}")
+        print(f"[c3 loss] weights nci={weights[0]:.3f} ui={weights[1]:.3f} ci={weights[2]:.3f}")
+        print('[c3 loss] UI is not rarer than NCI. Option 1 will not by itself create a third mode.')
+        loss_fn = class_balanced_categorical_focal(
+            weights, gamma=gamma, focal_weight=focal_weight)
+        loss_name = loss_fn.__name__
+        
     else:
         pos_weight = None
         loss_name = opts['loss_name']

@@ -162,3 +162,27 @@ def bce_plus_focal_loss(gamma=2.0, focal_weight=1.0, pos_weight=1.0, alpha=None)
         name += f"_a{alpha}"
     bce_focal_fixed.__name__ = name
     return bce_focal_fixed
+
+def class_balanced_categorical_focal(class_weights, gamma=1.0, focal_weight=1.0):
+    """Weighted categorical CE plus the same CE modulated by (1 - p_t)^gamma.
+
+    y_true and y_pred are (batch, 3): one-hot and softmax.
+    class_weights has one positive number per class, in order nci, ui, ci.
+    gamma=0 and focal_weight=0 with equal weights is plain categorical CE.
+    """
+    weights = tf.constant([float(v) for v in class_weights], dtype=tf.float32)
+
+    def c3_focal_fixed(y_true, y_pred):
+        y = tf.cast(y_true, tf.float32)
+        p = K.clip(tf.cast(y_pred, tf.float32), K.epsilon(), 1.0 - K.epsilon())
+        w = tf.reduce_sum(y * weights, axis=-1)
+        ce = -tf.reduce_sum(y * tf.math.log(p), axis=-1)
+        p_t = tf.reduce_sum(y * p, axis=-1)
+        focal = tf.pow(1.0 - p_t, gamma) * ce
+        return tf.reduce_mean(w * ce + focal_weight * w * focal)
+
+    c3_focal_fixed.__name__ = (
+        f"c3_wce_focal_g{gamma}_fw{focal_weight}_"
+        + "_".join(f"{float(v):.3f}" for v in class_weights)
+    )
+    return c3_focal_fixed
