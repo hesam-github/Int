@@ -1,0 +1,78 @@
+PROMPT [offline_features]: 
+ANSWER 0,1,2
+PROMPT [use_visual] y/n [default: y]: 
+ANSWER y
+PROMPT [backbone] 0/1/2 [default 0]: 
+ANSWER 0
+PROMPT Select [1-9] (default pie_convlstm): 
+ANSWER 5
+PROMPT Select [1-4] (default 1): 
+ANSWER 4
+PROMPT [branch] replace the visual temporal block? [y/N]: 
+ANSWER n
+PROMPT [branch] replace the per-branch LSTM? [y/N]: 
+ANSWER n
+PROMPT [bbox_mode] 0/1 [default: 0]: 
+ANSWER 0
+PROMPT [visual_norm] y/n [default: n]: 
+ANSWER n
+PROMPT [visual_percentile] use positive-percentile scaling (q=99, no center/clip)? [y/N]: 
+ANSWER n
+PROMPT [capacity] select preset [0-5, default 0]: 
+ANSWER 0
+PROMPT [capacity] add log1p to VGG features before the ConvLSTM (tail test)? [y/N]: 
+ANSWER n
+PROMPT [capacity] ConvLSTM return_sequences=True? (sequence of maps instead of last step only) [y/N]: 
+ANSWER n
+PROMPT [log_mode] enter a number from the list above [default: 0 -> 'clean']: 
+ANSWER 0
+PROMPT [balance_mode] enter a number from the list above [default: 0 -> 'augmentation']: 
+ANSWER 2
+PROMPT [flow_representation] 0/1 [default: 0]: 
+ANSWER 0
+PROMPT [monitor_metric] enter a number from the list above [default: 0 -> 'val_nll']: 
+ANSWER 1
+PROMPT Select [0/1] (default 0): 
+ANSWER 1
+PROMPT [protocol] use obs=15 and overlap=0.3 for this run? [y/N]: 
+ANSWER y
+PROMPT [clip_mode] enter a number from the list above [default: 0 -> 'clipvalue']: 
+ANSWER 3
+PROMPT [weight_decay] enter a value [default: 0.0] (non-zero will be rejected in this environment): 
+ANSWER 0
+PROMPT Choose [1/2] (Enter = sigmoid): 
+ANSWER 2
+PROMPT [normalize_bbox] 0/1 [default: 1]: 
+ANSWER 0
+PROMPT [plateau] use ReduceLROnPlateau? [Y/n]: 
+ANSWER y
+PROMPT [eval_every] enter a number from the list above [default: 1]: 
+ANSWER 4
+PROMPT [pose_scale] 0/1 [default: 0]: 
+ANSWER 0
+PROMPT [pose_min_height] 0/1/2 [default: 0]: 
+ANSWER 1
+PROMPT [tte] attach time-to-event? (annotation-derived future information: ablation only) [y/N]: 
+ANSWER n
+PROMPT [data_split_type] enter a number from the list above [default: 0 -> 'default']: 
+ANSWER 0
+PROMPT [seed] train seed (non-negative int) [default: 1]: 
+ANSWER 1
+PROMPT [seed] shuffle seed (non-negative int) [default: 1]: 
+ANSWER 1
+PROMPT [seed] data seed (non-negative int) [default: 42]: 
+ANSWER 42
+PROMPT [extra_norm] 0/1 [default: 0]: 
+ANSWER 1
+PROMPT   [pose_critical] 0..7 [default: 1]: 
+ANSWER 
+PROMPT   [scene_critical] 0..7 [default: 1]: 
+ANSWER 
+PROMPT   [light_color] 0..7 [default: 1]: 
+ANSWER 
+PROMPT   [flow_critical] 0..7 [default: 1]: 
+ANSWER 
+PROMPT aux_loss_weight (default 0.0): 
+ANSWER 0
+PROMPT [run_name] enter an OPTIONAL prefix for this NEW run (prepended to the auto hyperparameter tag 'gated_add_BAttnT6_3c_defaultSplit') [default: no prefix -> 'gated_add_BAttnT6_3c_defaultSplit']: 
+ANSWER c3_gated

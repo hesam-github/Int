@@ -926,17 +926,17 @@ def evaluate_run(model, data, saved, paths, history, hp):
 
     if 'intention_3class' in (d_opts.get('output_type') or []):
         print_phase(PHASE_FULL_EVAL)
-        print('[eval] 3-class: best model.h5, overlap=1, train val and test.')
+        print('[eval] 3-class: best model.h5, same overlap as training, train val and test.')
         print('[eval] Decision is argmax. Binary threshold and calibration are not used.')
-        print('[eval] overlap=1 is the same final pass as the binary runs. It is not Diving Deeper overlap=0.3.')
+        print('[eval] Table II only if overlap is 0.3 and the test count is 6472.')
         metrics = {}
         for name, seq in (('train', data['train']), ('val', data['val']), ('test', data['test'])):
             metrics[name] = evaluate_split_multiclass(
                 model, seq, d_opts, saved, paths, name)
         print_summary_table(
-            "SUMMARY -- 3-CLASS (argmax, overlap=1)",
+            "SUMMARY -- 3-CLASS (argmax, training overlap)",
             "[note] balanced_acc is macro recall. auc is macro one-vs-rest. "
-            "Per-class auc is one-vs-rest. Not Table II of Diving Deeper.",
+            "Comparable to Diving Deeper Table II only when test n is 6472.",
             metrics['train'], metrics['val'], metrics['test'])
         return dict(metrics=metrics, metrics_calibrated=None, threshold=None,
                     metrics_prior_corrected=None, metrics_custom=None)

@@ -1719,15 +1719,18 @@ def evaluate_split_full_metrics(model, data_split, data_opts, saved_files_path,
 
 def evaluate_split_multiclass(model, data_split, data_opts, saved_files_path,
                               paths, split_name):
-    """Best checkpoint, overlap=1, argmax over the 3-class softmax."""
+    """Best checkpoint, argmax over the 3-class softmax.
+
+    Overlap is the training overlap. Table II needs 0.3 and 6472 test windows.
+    """
     from pie_intent_helpers import compute_multiclass_metrics
+    overlap = float(data_opts['seq_overlap_rate'])
     acc, f1 = model.test_chunk(
         data_split, data_opts, saved_files_path, visualize=False,
         results_suffix=f'_{split_name}', vis_num_correct=30, vis_num_incorrect=30,
+        overlap_override=overlap,
     )
-    print(f"[note] '{split_name}' uses overlap=1, not "
-          f"seq_overlap_rate={data_opts['seq_overlap_rate']}. "
-          f"Not the Diving Deeper overlap of 0.3.")
+    print(f"[note] '{split_name}' uses overlap={overlap}.")
     print(f"[{split_name}] argmax accuracy={acc:.4f}  macro_f1={f1:.4f}")
     y_prob, y_true = load_ped_intents_pkl(saved_files_path, split_name)
     split_metrics_path = paths['metrics_path'].replace('.json', f'_{split_name}.json')
@@ -1747,6 +1750,15 @@ def evaluate_split_multiclass(model, data_split, data_opts, saved_files_path,
               f"auc={metrics[f'auc_{name}']:.4f} | "
               f"ap={metrics[f'ap_{name}']:.4f}")
     print(f"  confusion_matrix={metrics['confusion_matrix']}")
+    n = int(metrics['n_test_samples'])
+    expected = {'train': 8213, 'val': 2299, 'test': 6472}
+    target = expected.get(split_name)
+    if overlap == 0.3 and target is not None and n != target:
+        print(f"[protocol] {split_name} has {n} windows, Diving Deeper has {target}. Not Table II.")
+    elif overlap == 0.3 and split_name == 'test' and n == 6472:
+        print('[protocol] test window count matches Table II. Inputs still differ from those four models.')
+    else:
+        print(f'[protocol] overlap={overlap} is not the Table II sampling.')
     return metrics
 
 def recompute_split_metrics_at_threshold(saved_files_path, paths, split_name, threshold):
