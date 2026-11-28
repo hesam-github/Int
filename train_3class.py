@@ -83,6 +83,15 @@ def decide(text):
         return '0'
     if '[visual_norm]' in text:
         return 'n'
+
+    if 'Select [0/1/2] (default 1):' in text and '3-class loss' in text:
+        return '1'
+    if text.strip().startswith('gamma [default 1.0]:'):
+        return '1.0'
+    if text.strip().startswith('focal_weight [default 1.0]:'):
+        return '1.0'
+    if text.strip().startswith('UI push factor [default 3.0]:'):
+        return '3.0'
     if '[visual_percentile]' in text:
         return 'n'
     if '[capacity] add log1p' in text:
@@ -93,6 +102,8 @@ def decide(text):
         return '0'
     if '[log_mode]' in text:
         return '0'
+    if 'Select [0/1/2] (default 1):' in text:
+        return '1'
     if '[balance_mode]' in text:
         return '2'
     if '[flow_representation]' in text:

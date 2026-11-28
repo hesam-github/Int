@@ -164,11 +164,10 @@ def bce_plus_focal_loss(gamma=2.0, focal_weight=1.0, pos_weight=1.0, alpha=None)
     return bce_focal_fixed
 
 def class_balanced_categorical_focal(class_weights, gamma=1.0, focal_weight=1.0):
-    """Weighted categorical CE plus the same CE modulated by (1 - p_t)^gamma.
+    """Weighted categorical CE + focal modulation on the true-class term.
 
-    y_true and y_pred are (batch, 3): one-hot and softmax.
-    class_weights has one positive number per class, in order nci, ui, ci.
-    gamma=0 and focal_weight=0 with equal weights is plain categorical CE.
+    y_true, y_pred: (batch, 3) one-hot and softmax.
+    class_weights: sequence of 3 positive floats, order nci, ui, ci.
     """
     weights = tf.constant([float(v) for v in class_weights], dtype=tf.float32)
 

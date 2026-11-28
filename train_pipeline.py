@@ -213,25 +213,53 @@ def pick_run_options(hp):
     print(f"[config] TASK = {opts['task']}")
     if opts['task'] == '3class':
         print('--- 3-class loss ---')
-        print('  [0] categorical_crossentropy')
-        print('  [1] weighted CE + focal. Weights from train tracks, mean 1.  <-- suggested')
-        print('      gamma=1.0, focal_weight=1.0')
-        print('  [2] same loss, then multiply the UI weight by 3 and set the mean back to 1.')
-        print('      This is a push. Accuracy can fall. Keep the run only if macro F1 rises.')
+        print('  [0] categorical_crossentropy (no class weights, no focal)')
+        print('  [1] weighted CE + focal. Weights = inverse train-track frequency, mean 1.  <-- suggested')
+        print('  [2] same as [1], then multiply the UI weight by a factor you choose and re-normalize mean to 1.')
         loss_raw = input('Select [0/1/2] (default 1): ').strip()
         if loss_raw == '0':
             opts['loss_name'] = 'categorical_crossentropy'
             opts['loss_fn'] = 'categorical_crossentropy'
-            opts['ui_push'] = False
-        elif loss_raw == '2':
-            opts['loss_name'] = 'c3_weighted_focal'
-            opts['loss_fn'] = None
-            opts['ui_push'] = True
+            opts['c3_gamma'] = None
+            opts['c3_focal_weight'] = None
+            opts['c3_ui_push'] = 1.0
         else:
             opts['loss_name'] = 'c3_weighted_focal'
             opts['loss_fn'] = None
-            opts['ui_push'] = False
-        print(f"[config] LOSS_FUNCTION (family) = {opts['loss_name']} ui_push={opts['ui_push']}")
+            print('\n[c3] gamma (focusing strength).')
+            print('  0.0 = no focusing (weighted CE only)')
+            print('  1.0 = mild   <-- suggested')
+            print('  2.0 = strong')
+            g_raw = input('gamma [default 1.0]: ').strip()
+            try:
+                opts['c3_gamma'] = float(g_raw) if g_raw else 1.0
+            except ValueError:
+                opts['c3_gamma'] = 1.0
+                print('  ! invalid, using 1.0')
+            print('\n[c3] focal_weight (multiplier on the focal term).')
+            print('  0.0 = pure weighted CE')
+            print('  1.0 = equal mix   <-- suggested')
+            fw_raw = input('focal_weight [default 1.0]: ').strip()
+            try:
+                opts['c3_focal_weight'] = float(fw_raw) if fw_raw else 1.0
+            except ValueError:
+                opts['c3_focal_weight'] = 1.0
+                print('  ! invalid, using 1.0')
+            if loss_raw == '2':
+                print('\n[c3] UI push factor. After inverse-frequency weights, multiply UI by this, then re-normalize mean to 1.')
+                print('  1.0 = no extra push')
+                print('  3.0 = stronger push toward the middle class (accuracy may drop)')
+                ui_raw = input('UI push factor [default 3.0]: ').strip()
+                try:
+                    opts['c3_ui_push'] = float(ui_raw) if ui_raw else 3.0
+                except ValueError:
+                    opts['c3_ui_push'] = 3.0
+                    print('  ! invalid, using 3.0')
+            else:
+                opts['c3_ui_push'] = 1.0
+        print(f"[config] LOSS_FUNCTION (family) = {opts['loss_name']}")
+        if opts['loss_name'] == 'c3_weighted_focal':
+            print(f"[config] c3_gamma={opts['c3_gamma']}  c3_focal_weight={opts['c3_focal_weight']}  c3_ui_push={opts['c3_ui_push']}")
         print('[warning] val_auc for this task is macro one-vs-rest, not binary ROC-AUC.')
         print('[protocol] Diving Deeper samples PIE intention with obs=15 and overlap=0.3.')
         print('           Their test set is 6472 windows. Your DATA_OPTS overlap is not that protocol.')
@@ -529,19 +557,19 @@ def prepare_data(opts, data_opts, pie_path):
         counts = np.maximum(counts, 1.0)
         weights = counts.sum() / counts
         weights = weights / weights.mean()
-        if opts.get('ui_push'):
-            weights = weights * np.array([1.0, 3.0, 1.0], dtype=np.float64)
+        ui_push = float(opts.get('c3_ui_push', 1.0))
+        if ui_push != 1.0:
+            weights = weights * np.array([1.0, ui_push, 1.0], dtype=np.float64)
             weights = weights / weights.mean()
-        gamma = 1.0
-        focal_weight = 1.0
+        gamma = float(opts.get('c3_gamma', 1.0))
+        focal_weight = float(opts.get('c3_focal_weight', 1.0))
         print(f"[c3 loss] train-track counts nci={counts[0]:.0f} ui={counts[1]:.0f} ci={counts[2]:.0f}")
-        print(f"[c3 loss] gamma={gamma} focal_weight={focal_weight}")
-        print(f"[c3 loss] weights nci={weights[0]:.3f} ui={weights[1]:.3f} ci={weights[2]:.3f}")
-        print('[c3 loss] UI is not rarer than NCI. Option 1 will not by itself create a third mode.')
+        print(f"[c3 loss] gamma={gamma} focal_weight={focal_weight} ui_push={ui_push}")
+        print(f"[c3 loss] final weights nci={weights[0]:.3f} ui={weights[1]:.3f} ci={weights[2]:.3f}")
+        print('[c3 loss] UI is not rarer than NCI. Inverse-frequency alone will not create a third mode.')
         loss_fn = class_balanced_categorical_focal(
             weights, gamma=gamma, focal_weight=focal_weight)
         loss_name = loss_fn.__name__
-        
     else:
         pos_weight = None
         loss_name = opts['loss_name']
